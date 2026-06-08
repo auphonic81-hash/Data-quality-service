@@ -184,6 +184,10 @@ class DataRemediator:
         before = series.copy()
 
         # Step 1: basic cleaning
+        # Common acronyms / abbreviations to preserve verbatim
+        ACRONYMS = {"IT", "HR", "USA", "UAE", "UK", "EU", "CEO", "CTO", "CFO",
+                    "VIP", "B2B", "B2C", "SQL", "API", "AI", "ML", "PR"}
+
         def clean_one(value: Any) -> Any:
             if pd.isna(value):
                 return value
@@ -191,7 +195,18 @@ class DataRemediator:
             text = re.sub(r"\s+", " ", text)
             if re.search(r"[\u0600-\u06FF]", text):
                 return text
-            return text.title()
+            # Title-case each token but preserve acronyms (2-4 letter all-caps)
+            tokens = text.split()
+            out = []
+            for tok in tokens:
+                stripped = re.sub(r"[^A-Za-z]", "", tok)
+                if stripped.upper() in ACRONYMS or (
+                    len(stripped) <= 4 and stripped.isalpha() and stripped.isupper()
+                ):
+                    out.append(tok.upper())
+                else:
+                    out.append(tok.capitalize())
+            return " ".join(out)
 
         cleaned = series.apply(clean_one)
 
@@ -273,32 +288,33 @@ class DataRemediator:
 
     @staticmethod
     def _auto_detect_type(series: pd.Series) -> str:
-        """Heuristically detect the type of a column for remediation."""
+        """Heuristically detect the type of a column for remediation.
+        Column-name hints come first; content heuristics are a fallback."""
         if series.dtype != object:
             return "numeric"
+
+        name = (str(series.name) if series.name is not None else "").lower()
+
+        # Name-based hints (most reliable)
+        if any(t in name for t in ("date", "time", "_at", "birthday", "dob")):
+            return "date"
+        if any(t in name for t in ("email", "mail")):
+            return "email"
+        if any(t in name for t in ("phone", "mobile", "fax", "tel")):
+            return "phone"
+        if any(t in name for t in ("name", "title", "owner", "contact", "person")):
+            return "name"
 
         sample = series.dropna().astype(str).head(50)
         if sample.empty:
             return "text"
 
-        # Phone detection
-        phone_like = sum(
-            1 for v in sample
-            if re.match(r"^[\+\d\s\-\(\)]{7,20}$", v.strip())
-        )
-        if phone_like / len(sample) > 0.7:
-            return "phone"
-
-        # Email detection
-        email_like = sum(1 for v in sample if "@" in v and "." in v)
-        if email_like / len(sample) > 0.7:
-            return "email"
-
-        # Date detection
+        # Date detection BEFORE phone (since dates can look numeric)
         date_patterns = [
-            r"^\d{4}-\d{2}-\d{2}",
-            r"^\d{2}/\d{2}/\d{4}",
-            r"^\d{2}-\d{2}-\d{4}",
+            r"^\d{4}-\d{1,2}-\d{1,2}",
+            r"^\d{1,2}/\d{1,2}/\d{4}",
+            r"^\d{1,2}-\d{1,2}-\d{4}",
+            r"^\d{4}/\d{1,2}/\d{1,2}",
         ]
         date_like = sum(
             1 for v in sample
@@ -307,7 +323,21 @@ class DataRemediator:
         if date_like / len(sample) > 0.7:
             return "date"
 
-        # Name detection (heuristic: short alpha-only strings)
+        # Email detection
+        email_like = sum(1 for v in sample if "@" in v and "." in v)
+        if email_like / len(sample) > 0.7:
+            return "email"
+
+        # Phone detection (strict — must start with + or 00, or be 10+ digits)
+        phone_like = sum(
+            1 for v in sample
+            if re.match(r"^(\+|00)?[\d\s\-\(\)]{10,20}$", v.strip())
+            and sum(c.isdigit() for c in v) >= 8
+        )
+        if phone_like / len(sample) > 0.7:
+            return "phone"
+
+        # Name detection
         name_like = sum(
             1 for v in sample
             if re.match(r"^[a-zA-Z\u0600-\u06FF\s\-\.]{2,40}$", v.strip())

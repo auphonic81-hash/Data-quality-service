@@ -165,6 +165,24 @@ def export_dataset(dataset_id: str):
         return jsonify({"error": str(exc)}), 500
 
 
+@app.route("/api/datasets/<dataset_id>/materialize", methods=["POST"])
+def materialize_normalization(dataset_id: str):
+    try:
+        return jsonify(service.materialize_normalization(dataset_id))
+    except KeyError as exc:
+        return jsonify({"error": str(exc)}), 404
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/datasets/<dataset_id>/normalized.zip", methods=["GET"])
+def download_normalized_zip(dataset_id: str):
+    zip_path = config.REPORTS_DIR / f"{dataset_id}_normalized.zip"
+    if not zip_path.exists():
+        return jsonify({"error": "Normalized files not found. Run /materialize first."}), 404
+    return send_file(zip_path, as_attachment=True)
+
+
 @app.route("/api/datasets/<dataset_id>/report", methods=["GET"])
 def get_report(dataset_id: str):
     report_path = config.REPORTS_DIR / f"{dataset_id}_profile.html"

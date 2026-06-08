@@ -254,6 +254,7 @@
           <button class="btn btn-secondary" onclick="remediateDataset()">Apply Fixes</button>
           <button class="btn btn-secondary" onclick="exportDataset()">Export CSV</button>
           <button class="btn btn-secondary" onclick="window.open('/api/datasets/${info.dataset_id}/report', '_blank')">View Report</button>
+          <button class="btn btn-success" onclick="materializeNormalization()">Split Into Tables</button>
         </div>
         <div id="analysis-output" style="margin-top: 24px;"></div>
       `;
@@ -304,6 +305,38 @@
 
       const schemaSql = schema.create_statement || '';
 
+      // Schema normalization rendering
+      const norm = r.normalization || {};
+      let normalizationHtml = '';
+      if (norm.is_denormalized && norm.entity_count > 0) {
+        const entitiesHtml = (norm.entities || []).map(e => `
+          <div class="issue info">
+            <strong>${escapeHtml(e.entity_name)}</strong> entity
+            (${e.distinct_rows} distinct rows • ${Math.round(e.reduction_ratio * 100)}% reduction)
+            <div style="font-size: 12px; color: var(--muted); margin-top: 4px;">
+              Columns: ${e.columns.map(c => `<code>${escapeHtml(c)}</code>`).join(', ')}
+            </div>
+          </div>
+        `).join('');
+
+        const ddlHtml = Object.entries(norm.create_statements || {}).map(([name, ddl]) =>
+          `<div style="margin-bottom: 12px;"><pre>${escapeHtml(ddl)}</pre></div>`
+        ).join('');
+
+        normalizationHtml = `
+          <div class="section">
+            <h3>🏗️ Schema Normalization (1NF → 3NF)</h3>
+            <div class="review-banner" style="border-left-color: var(--accent);">
+              Detected <strong>${norm.entity_count}</strong> separate entit${norm.entity_count > 1 ? 'ies' : 'y'}
+              hidden inside this flat table. Below is the normalized schema with proper foreign keys.
+            </div>
+            <div style="margin-top: 12px;">${entitiesHtml}</div>
+            <h3 style="margin-top: 20px;">Generated Normalized DDL</h3>
+            ${ddlHtml}
+          </div>
+        `;
+      }
+
       const consistency = r.consistency || {};
       const consIssues = consistency.issues || [];
       let consistencyHtml = '';
@@ -343,7 +376,8 @@
         ${constantCols ? `<div class="section"><h3>Constant Columns</h3>${constantCols}</div>` : ''}
         ${customFindingsHtml ? `<div class="section"><h3>Custom Findings</h3>${customFindingsHtml}</div>` : ''}
         ${consistencyHtml}
-        ${schemaSql ? `<div class="section"><h3>Inferred Schema</h3><pre>${schemaSql}</pre></div>` : ''}
+        ${normalizationHtml}
+        ${schemaSql ? `<div class="section"><h3>Inferred Schema (Single Table)</h3><pre>${schemaSql}</pre></div>` : ''}
       `;
     }
 
@@ -436,6 +470,62 @@
 
     function exportDataset() {
       window.open(`/api/datasets/${state.activeDataset}/export?format=csv`, '_blank');
+    }
+
+    async function materializeNormalization() {
+      const out = document.getElementById('analysis-output');
+      if (out) out.innerHTML = '<div class="loader"></div> Splitting into normalized tables...';
+      try {
+        const result = await api(`/api/datasets/${state.activeDataset}/materialize`, {
+          method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({})
+        });
+        if (!result.materialized) {
+          toast(result.reason || 'Could not materialize', 'error');
+          out.innerHTML = '';
+          return;
+        }
+        renderMaterialization(result);
+        toast(`Created ${result.entity_count + 1} normalized tables`, 'success');
+      } catch (e) {
+        if (out) out.innerHTML = '';
+        toast(e.message, 'error');
+      }
+    }
+
+    function renderMaterialization(r) {
+      const tablesHtml = (r.tables || []).map(t => {
+        const cols = t.columns;
+        const headerRow = '<tr>' + cols.map(c => `<th>${escapeHtml(c)}</th>`).join('') + '</tr>';
+        const previewRows = (t.preview || []).map(row =>
+          '<tr>' + cols.map(c => `<td>${escapeHtml(String(row[c] ?? ''))}</td>`).join('') + '</tr>'
+        ).join('');
+        return `
+          <div class="section">
+            <h3>📊 ${escapeHtml(t.name)} <span style="color: var(--muted); font-weight: normal; font-size: 12px;">— ${t.rows} rows, ${cols.length} columns</span></h3>
+            <div class="diff-wrapper">
+              <table class="diff-table">
+                <thead>${headerRow}</thead>
+                <tbody>${previewRows}</tbody>
+              </table>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      const ddlHtml = Object.entries(r.create_statements || {}).map(([name, ddl]) =>
+        `<div style="margin-bottom: 10px;"><pre>${escapeHtml(ddl)}</pre></div>`
+      ).join('');
+
+      document.getElementById('analysis-output').innerHTML = `
+        <div class="stat-grid">
+          <div class="stat success"><div class="label">Entities Extracted</div><div class="value">${r.entity_count}</div></div>
+          <div class="stat success"><div class="label">Total Tables</div><div class="value">${r.tables.length}</div></div>
+          <div class="stat"><div class="label">Status</div><div class="value" style="font-size: 14px;">Materialized</div></div>
+          <div class="stat"><div class="label">Download</div><div class="value" style="font-size: 12px;"><a href="/api/datasets/${state.activeDataset}/normalized.zip" style="color: var(--accent);">ZIP file ↓</a></div></div>
+        </div>
+        <div class="section"><h3>Normalized Tables — Preview</h3>${tablesHtml}</div>
+        <div class="section"><h3>Generated DDL</h3>${ddlHtml}</div>
+      `;
     }
 
     function toast(msg, type = 'info') {

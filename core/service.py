@@ -6,6 +6,7 @@ ingestion, profiling, schema inference, quality detection, and remediation.
 from __future__ import annotations
 
 import uuid
+import zipfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,7 @@ import pandas as pd
 
 from .consistency import RecordConsistencyChecker
 from .ingestion import DataIngestion
+from .normalizer import SchemaNormalizer
 from .profiling import DataProfiler
 from .quality_detection import QualityDetector
 from .remediation import DataRemediator
@@ -41,6 +43,7 @@ class DataQualityService:
             ollama_url=ollama_url, ollama_model=ollama_model
         )
         self.consistency_checker = RecordConsistencyChecker()
+        self.normalizer = SchemaNormalizer()
 
         self._cache: dict[str, dict[str, Any]] = {}
 
@@ -74,6 +77,7 @@ class DataQualityService:
         quality = self.detector.detect_all(df)
         schema = self.schema_inferencer.infer(df, table_name=table_name)
         consistency = self.consistency_checker.check(df)
+        normalization = self.normalizer.normalize(df, source_table_name=table_name)
 
         analysis = {
             "dataset_id": dataset_id,
@@ -84,6 +88,7 @@ class DataQualityService:
             "custom_findings": profile["custom_findings"],
             "quality_issues": quality,
             "consistency": consistency,
+            "normalization": normalization,
             "inferred_schema": schema,
             "html_report_path": str(report_path),
             "analyzed_at": datetime.utcnow().isoformat() + "Z",
@@ -188,12 +193,68 @@ class DataQualityService:
         }
         return dataset_id
 
+    def materialize_normalization(self, dataset_id: str) -> dict[str, Any]:
+            """Materialize the inferred normalized schema as physical CSV files.
+
+            Returns a dict with:
+              - tables: list of {name, rows, columns, csv_path}
+              - zip_path: path to a ZIP containing all CSVs
+            """
+            df = self._get_dataset(dataset_id)
+            norm = self.normalizer.normalize(df, source_table_name=dataset_id[:8])
+
+            if not norm.get("is_denormalized"):
+                return {
+                    "materialized": False,
+                    "reason": norm.get("skipped_reason", "No denormalization detected — nothing to split."),
+                }
+
+            materialized = self.normalizer.materialize(
+                df,
+                entities=norm["entities"],
+                fact_columns=norm["fact_table_columns"],
+                source_table_name=dataset_id[:8],
+            )
+
+            output_dir = self.reports_dir / f"{dataset_id}_normalized"
+            output_dir.mkdir(parents=True, exist_ok=True)
+
+            tables_info: list[dict[str, Any]] = []
+            for name, table_df in materialized.items():
+                csv_path = output_dir / f"{name}.csv"
+                table_df.to_csv(csv_path, index=False)
+                tables_info.append({
+                    "name": name,
+                    "rows": int(len(table_df)),
+                    "columns": list(table_df.columns),
+                    "preview": _to_json_safe(
+                        table_df.head(5).fillna("").astype(str).to_dict(orient="records")
+                    ),
+                    "csv_path": str(csv_path),
+                })
+
+            # Bundle into a ZIP for download
+            zip_path = self.reports_dir / f"{dataset_id}_normalized.zip"
+            with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+                for info in tables_info:
+                    zf.write(info["csv_path"], arcname=f"{info['name']}.csv")
+
+            return _to_json_safe({
+                "materialized": True,
+                "dataset_id": dataset_id,
+                "entity_count": len(norm["entities"]),
+                "tables": tables_info,
+                "zip_path": str(zip_path),
+                "create_statements": norm["create_statements"],
+            })
+
     def _get_dataset(self, dataset_id: str) -> pd.DataFrame:
         meta = self._cache.get(dataset_id)
         if not meta:
             raise KeyError(f"Dataset {dataset_id} not found")
         return meta["dataframe"]
     
+
 
 
 def _to_json_safe(obj):

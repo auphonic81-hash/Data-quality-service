@@ -108,16 +108,28 @@ class DataProfiler:
 
             column_findings: dict[str, Any] = {}
 
-            # Detect column intent based on values
-            if self._looks_like_phone(series):
-                column_findings["detected_type"] = "phone"
-                column_findings["format_consistency"] = self._check_phone_formats(series)
-            elif self._looks_like_email(series):
+            # Detect column intent — order matters: name hints first, then dates,
+            # then email, then phone (phones are the most permissive regex).
+            col_lower = column.lower()
+            if any(t in col_lower for t in ("date", "time", "_at", "birthday", "dob")):
+                if self._looks_like_date(series):
+                    column_findings["detected_type"] = "date"
+                    column_findings["format_consistency"] = self._check_date_formats(series)
+            elif any(t in col_lower for t in ("email", "mail")):
                 column_findings["detected_type"] = "email"
                 column_findings["valid_emails_pct"] = self._check_email_validity(series)
+            elif any(t in col_lower for t in ("phone", "mobile", "fax", "tel")):
+                column_findings["detected_type"] = "phone"
+                column_findings["format_consistency"] = self._check_phone_formats(series)
             elif self._looks_like_date(series):
                 column_findings["detected_type"] = "date"
                 column_findings["format_consistency"] = self._check_date_formats(series)
+            elif self._looks_like_email(series):
+                column_findings["detected_type"] = "email"
+                column_findings["valid_emails_pct"] = self._check_email_validity(series)
+            elif self._looks_like_phone(series):
+                column_findings["detected_type"] = "phone"
+                column_findings["format_consistency"] = self._check_phone_formats(series)
 
             # Arabic content detection
             arabic_pct = self._arabic_content_pct(series)
