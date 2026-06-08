@@ -1,0 +1,455 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Data Quality Service</title>
+  <style>
+    :root {
+      --bg: #0a0e1a;
+      --panel: #131826;
+      --border: #1f2738;
+      --accent: #4f9cf9;
+      --accent-2: #38d4a8;
+      --text: #e6ecf3;
+      --muted: #7d8ba1;
+      --danger: #ef5b5b;
+      --warning: #f5a623;
+      --success: #38d4a8;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 0;
+      background: var(--bg); color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
+      min-height: 100vh;
+    }
+    .container { max-width: 1280px; margin: 0 auto; padding: 32px 24px; }
+    .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 32px; }
+    .header h1 { margin: 0; font-size: 28px; font-weight: 700; }
+    .header h1 span { color: var(--accent); }
+    .header .subtitle { color: var(--muted); font-size: 14px; margin-top: 4px; }
+    .grid { display: grid; grid-template-columns: 360px 1fr; gap: 24px; }
+    .panel {
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: 12px; padding: 20px;
+    }
+    .panel h2 {
+      margin: 0 0 16px; font-size: 16px; font-weight: 600;
+      color: var(--text); display: flex; align-items: center; gap: 8px;
+    }
+    .panel h2::before {
+      content: ""; display: inline-block; width: 4px; height: 16px;
+      background: var(--accent); border-radius: 2px;
+    }
+    .upload-zone {
+      border: 2px dashed var(--border); border-radius: 8px;
+      padding: 32px; text-align: center; cursor: pointer;
+      transition: all 0.2s;
+    }
+    .upload-zone:hover { border-color: var(--accent); background: rgba(79, 156, 249, 0.05); }
+    .upload-zone.drag { border-color: var(--accent-2); background: rgba(56, 212, 168, 0.1); }
+    .upload-zone p { margin: 0 0 8px; color: var(--muted); }
+    .upload-zone strong { color: var(--text); }
+    .upload-zone input { display: none; }
+    .btn {
+      background: var(--accent); color: white; border: none;
+      padding: 10px 20px; border-radius: 6px; cursor: pointer;
+      font-weight: 600; font-size: 14px; transition: all 0.2s;
+    }
+    .btn:hover { background: #3a87e0; }
+    .btn:disabled { background: var(--border); cursor: not-allowed; opacity: 0.6; }
+    .btn-secondary { background: var(--border); color: var(--text); }
+    .btn-secondary:hover { background: #2a3346; }
+    .btn-success { background: var(--accent-2); }
+    .dataset-list { display: flex; flex-direction: column; gap: 8px; max-height: 320px; overflow-y: auto; }
+    .dataset-item {
+      padding: 12px; border: 1px solid var(--border); border-radius: 8px;
+      cursor: pointer; transition: all 0.2s;
+    }
+    .dataset-item:hover { border-color: var(--accent); }
+    .dataset-item.active { border-color: var(--accent); background: rgba(79, 156, 249, 0.08); }
+    .dataset-item .name { font-weight: 600; font-size: 13px; }
+    .dataset-item .meta { color: var(--muted); font-size: 12px; margin-top: 4px; }
+    .actions { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
+    .results { min-height: 400px; }
+    .empty-state { text-align: center; padding: 64px 24px; color: var(--muted); }
+    .empty-state svg { margin-bottom: 16px; opacity: 0.5; }
+    .stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+    .stat {
+      background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border);
+      border-radius: 8px; padding: 14px;
+    }
+    .stat .label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .stat .value { font-size: 22px; font-weight: 700; margin-top: 4px; }
+    .stat.warn .value { color: var(--warning); }
+    .stat.danger .value { color: var(--danger); }
+    .stat.success .value { color: var(--success); }
+    .section { margin-top: 24px; }
+    .section h3 { font-size: 14px; font-weight: 600; margin: 0 0 12px; color: var(--text); }
+    .issue {
+      background: rgba(255, 255, 255, 0.02); border-left: 3px solid var(--warning);
+      padding: 10px 14px; border-radius: 4px; margin-bottom: 8px; font-size: 13px;
+    }
+    .issue.danger { border-left-color: var(--danger); }
+    .issue.info { border-left-color: var(--accent); }
+    pre {
+      background: rgba(0, 0, 0, 0.3); padding: 12px; border-radius: 6px;
+      overflow-x: auto; font-size: 12px; color: #b8c5d6;
+    }
+    .loader {
+      display: inline-block; width: 16px; height: 16px;
+      border: 2px solid var(--border); border-top-color: var(--accent);
+      border-radius: 50%; animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .toast {
+      position: fixed; bottom: 24px; right: 24px;
+      background: var(--panel); border: 1px solid var(--border);
+      padding: 14px 20px; border-radius: 8px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+      animation: slideIn 0.3s;
+    }
+    .toast.success { border-color: var(--success); }
+    .toast.error { border-color: var(--danger); }
+    @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } }
+
+    .diff-table {
+      width: 100%; border-collapse: collapse; font-size: 12px;
+      margin-top: 12px;
+    }
+    .diff-table th, .diff-table td {
+      padding: 8px 10px; text-align: left; border: 1px solid var(--border);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      min-width: 140px; max-width: 240px;
+    }
+    .diff-table th {
+      background: rgba(255,255,255,0.04); font-weight: 600; color: var(--muted);
+      text-transform: uppercase; font-size: 10px; letter-spacing: 0.5px;
+    }
+    .diff-table .col-header {
+      background: rgba(79,156,249,0.08); color: var(--accent); font-weight: 700;
+    }
+    .diff-table td.changed {
+      background: rgba(56,212,168,0.08); color: var(--success);
+      font-weight: 500;
+    }
+    .diff-table td.original {
+      background: rgba(239,91,91,0.06); color: #f0a5a5;
+      text-decoration: line-through; opacity: 0.7;
+    }
+    .diff-wrapper { overflow-x: auto; border-radius: 8px; border: 1px solid var(--border); }
+    .missing { color: var(--warning); font-style: italic; opacity: 0.7; }
+
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div>
+        <h1>Data Quality <span>Service</span></h1>
+        <div class="subtitle">Automated profiling, schema inference, validation, and remediation</div>
+      </div>
+      <div class="subtitle" id="health">Connecting...</div>
+    </div>
+
+    <div class="grid">
+      <!-- Sidebar -->
+      <div>
+        <div class="panel">
+          <h2>Upload Data</h2>
+          <div class="upload-zone" id="upload-zone">
+            <p><strong>Drop a file here</strong></p>
+            <p>or click to browse</p>
+            <p style="font-size: 11px; margin-top: 12px;">CSV, Excel, JSON, Parquet, TSV</p>
+            <input type="file" id="file-input" accept=".csv,.xlsx,.xls,.json,.parquet,.tsv">
+          </div>
+        </div>
+
+        <div class="panel" style="margin-top: 16px;">
+          <h2>Datasets</h2>
+          <div class="dataset-list" id="dataset-list">
+            <div class="empty-state" style="padding: 24px 0;">
+              <p style="font-size: 13px;">No datasets loaded yet</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Main content -->
+      <div class="panel results">
+        <div id="results-content">
+          <div class="empty-state">
+            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
+            </svg>
+            <h3>Upload a file to begin</h3>
+            <p>Profile, validate, and clean your data automatically</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const state = { activeDataset: null, datasets: [] };
+
+    async function api(path, opts = {}) {
+      const res = await fetch(path, opts);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Request failed');
+      return data;
+    }
+
+    async function refreshDatasets() {
+      try {
+        state.datasets = await api('/api/datasets');
+        renderDatasets();
+      } catch (e) { toast(e.message, 'error'); }
+    }
+
+    function renderDatasets() {
+      const list = document.getElementById('dataset-list');
+      if (!state.datasets.length) {
+        list.innerHTML = '<div class="empty-state" style="padding: 24px 0;"><p style="font-size: 13px;">No datasets loaded yet</p></div>';
+        return;
+      }
+      list.innerHTML = state.datasets.map(d => `
+        <div class="dataset-item ${d.dataset_id === state.activeDataset ? 'active' : ''}" data-id="${d.dataset_id}">
+          <div class="name">${d.source.split('/').pop().split('::').pop()}</div>
+          <div class="meta">${d.rows} rows • ${d.columns} cols ${d.remediated ? '• ✓ cleaned' : ''}</div>
+        </div>
+      `).join('');
+      list.querySelectorAll('.dataset-item').forEach(el => {
+        el.addEventListener('click', () => selectDataset(el.dataset.id));
+      });
+    }
+
+    async function selectDataset(id) {
+      state.activeDataset = id;
+      renderDatasets();
+      const info = await api(`/api/datasets/${id}`);
+      renderDatasetView(info);
+    }
+
+    function renderDatasetView(info) {
+      const html = `
+        <h2 style="margin: 0 0 8px;">${info.source.split('/').pop().split('::').pop()}</h2>
+        <div style="color: var(--muted); font-size: 13px; margin-bottom: 20px;">
+          ${info.rows} rows • ${info.columns.length} columns • Loaded ${new Date(info.loaded_at).toLocaleString()}
+        </div>
+        <div class="actions">
+          <button class="btn" onclick="analyzeDataset()">Analyze Quality</button>
+          <button class="btn btn-secondary" onclick="remediateDataset()">Apply Fixes</button>
+          <button class="btn btn-secondary" onclick="exportDataset()">Export CSV</button>
+          <button class="btn btn-secondary" onclick="window.open('/api/datasets/${info.dataset_id}/report', '_blank')">View Report</button>
+        </div>
+        <div id="analysis-output" style="margin-top: 24px;"></div>
+      `;
+      document.getElementById('results-content').innerHTML = html;
+    }
+
+    async function analyzeDataset() {
+      const out = document.getElementById('analysis-output');
+      out.innerHTML = '<div class="loader"></div> Analyzing... (this can take 10-30 seconds)';
+      try {
+        const result = await api(`/api/datasets/${state.activeDataset}/analyze`, {
+          method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({})
+        });
+        renderAnalysis(result);
+        toast('Analysis complete', 'success');
+      } catch (e) { out.innerHTML = ''; toast(e.message, 'error'); }
+    }
+
+    function renderAnalysis(r) {
+      const summary = r.profile_summary || {};
+      const issues = r.quality_issues || {};
+      const findings = r.custom_findings || {};
+      const schema = r.inferred_schema || {};
+
+      const stats = `
+        <div class="stat-grid">
+          <div class="stat"><div class="label">Rows</div><div class="value">${r.row_count}</div></div>
+          <div class="stat"><div class="label">Columns</div><div class="value">${r.column_count}</div></div>
+          <div class="stat ${summary.alerts_count > 0 ? 'warn' : 'success'}"><div class="label">Alerts</div><div class="value">${summary.alerts_count ?? 0}</div></div>
+          <div class="stat ${(issues.exact_duplicates?.count ?? 0) > 0 ? 'danger' : 'success'}"><div class="label">Duplicates</div><div class="value">${issues.exact_duplicates?.count ?? 0}</div></div>
+        </div>
+      `;
+
+      const alerts = (summary.alerts || []).slice(0, 10).map(a =>
+        `<div class="issue">${a}</div>`
+      ).join('');
+
+      const constantCols = (issues.constant_columns || []).map(c =>
+        `<div class="issue info">Column "${c}" has only one unique value</div>`
+      ).join('');
+
+      const customFindingsHtml = Object.entries(findings).map(([col, f]) => {
+        const lines = Object.entries(f).map(([k, v]) =>
+          `<div style="font-size: 12px; color: var(--muted);">${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}</div>`
+        ).join('');
+        return `<div class="issue info"><strong>${col}</strong>${lines}</div>`;
+      }).join('');
+
+      const schemaSql = schema.create_statement || '';
+
+      document.getElementById('analysis-output').innerHTML = `
+        ${stats}
+        ${alerts ? `<div class="section"><h3>ydata-profiling Alerts</h3>${alerts}</div>` : ''}
+        ${constantCols ? `<div class="section"><h3>Constant Columns</h3>${constantCols}</div>` : ''}
+        ${customFindingsHtml ? `<div class="section"><h3>Custom Findings</h3>${customFindingsHtml}</div>` : ''}
+        ${schemaSql ? `<div class="section"><h3>Inferred Schema</h3><pre>${schemaSql}</pre></div>` : ''}
+      `;
+    }
+
+    async function remediateDataset() {
+      const out = document.getElementById('analysis-output');
+      const loadingHtml = '<div class="loader"></div> Applying fixes...';
+      if (out) out.innerHTML = loadingHtml;
+      try {
+        const result = await api(`/api/datasets/${state.activeDataset}/remediate`, {
+          method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({})
+        });
+        toast(`Applied ${result.total_changes} fixes`, 'success');
+        renderDiff(result);
+        refreshDatasets();
+      } catch (e) {
+        if (out) out.innerHTML = '';
+        toast(e.message, 'error');
+      }
+    }
+
+    function renderDiff(result) {
+      const cols = result.columns || [];
+      const before = result.before_preview || [];
+      const after = result.after_preview || [];
+
+      const changeSummary = Object.entries(result.change_log || {})
+        .map(([col, log]) => {
+          const extra = log.clusters_merged ? ` • ${log.clusters_merged} clusters merged` : '';
+          return `<div class="issue info"><strong>${col}</strong> (${log.type}): ${log.changes} changes${extra}</div>`;
+        }).join('');
+
+      // Only show columns that had changes (or first 6 if no changes)
+      const changedCols = cols.filter(col => {
+        for (let i = 0; i < Math.min(15, before.length); i++) {
+          const b = before[i] || {}, a = after[i] || {};
+          if (String(b[col] ?? '') !== String(a[col] ?? '')) return true;
+        }
+        return false;
+      });
+      const displayCols = changedCols.length > 0 ? changedCols : cols.slice(0, 6);
+
+      let rows = '';
+      for (let i = 0; i < Math.min(15, before.length); i++) {
+        const b = before[i] || {}, a = after[i] || {};
+        rows += '<tr>';
+        displayCols.forEach(col => {
+          const bv = String(b[col] ?? '').trim(), av = String(a[col] ?? '').trim();
+          const bvDisplay = bv === '' ? '<span class="missing">∅ missing</span>' : escapeHtml(bv);
+          const avDisplay = av === '' ? '<span class="missing">∅ missing</span>' : escapeHtml(av);
+          if (bv === av) {
+            rows += `<td title="${escapeAttr(av)}">${avDisplay}</td>`;
+          } else {
+            rows += `<td title="Was: ${escapeAttr(bv)} → Now: ${escapeAttr(av)}">
+              <div class="original">${bvDisplay}</div>
+              <div class="changed">${avDisplay}</div>
+            </td>`;
+          }
+        });
+        rows += '</tr>';
+      }
+
+      const headerRow = '<tr>' + displayCols.map(c => `<th>${escapeHtml(c)}</th>`).join('') + '</tr>';
+
+      document.getElementById('analysis-output').innerHTML = `
+        <div class="stat-grid">
+          <div class="stat success"><div class="label">Total Fixes</div><div class="value">${result.total_changes}</div></div>
+          <div class="stat ${result.total_failures > 0 ? 'warn' : 'success'}"><div class="label">Failures</div><div class="value">${result.total_failures}</div></div>
+          <div class="stat"><div class="label">Columns Cleaned</div><div class="value">${Object.keys(result.change_log || {}).length}</div></div>
+          <div class="stat"><div class="label">Preview Rows</div><div class="value">${Math.min(15, before.length)}</div></div>
+        </div>
+        ${changeSummary ? `<div class="section"><h3>Changes by Column</h3>${changeSummary}</div>` : ''}
+        <div class="section">
+          <h3>Before / After (first 15 rows — red = original, green = cleaned)</h3>
+          <div class="diff-wrapper">
+            <table class="diff-table">
+              <thead>${headerRow}</thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+        </div>
+      `;
+    }
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"\']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    }
+    function escapeAttr(s) {
+      return escapeHtml(s).replace(/\n/g, ' ');
+    }
+
+    function exportDataset() {
+      window.open(`/api/datasets/${state.activeDataset}/export?format=csv`, '_blank');
+    }
+
+    function toast(msg, type = 'info') {
+      const t = document.createElement('div');
+      t.className = `toast ${type}`;
+      t.textContent = msg;
+      document.body.appendChild(t);
+      setTimeout(() => t.remove(), 3500);
+    }
+
+    // Upload handlers
+    const uploadZone = document.getElementById('upload-zone');
+    const fileInput = document.getElementById('file-input');
+    uploadZone.addEventListener('click', () => fileInput.click());
+    uploadZone.addEventListener('dragover', e => { e.preventDefault(); uploadZone.classList.add('drag'); });
+    uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('drag'));
+    uploadZone.addEventListener('drop', e => {
+      e.preventDefault();
+      uploadZone.classList.remove('drag');
+      if (e.dataTransfer.files[0]) handleUpload(e.dataTransfer.files[0]);
+    });
+    fileInput.addEventListener('change', () => {
+      if (fileInput.files[0]) handleUpload(fileInput.files[0]);
+    });
+
+    async function handleUpload(file) {
+      const form = new FormData();
+      form.append('file', file);
+      uploadZone.innerHTML = '<div class="loader"></div> Uploading...';
+      try {
+        const res = await fetch('/api/upload', { method: 'POST', body: form });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
+        toast(`Loaded ${data.rows} rows`, 'success');
+        await refreshDatasets();
+        selectDataset(data.dataset_id);
+      } catch (e) {
+        toast(e.message, 'error');
+      } finally {
+        uploadZone.innerHTML = `
+          <p><strong>Drop a file here</strong></p>
+          <p>or click to browse</p>
+          <p style="font-size: 11px; margin-top: 12px;">CSV, Excel, JSON, Parquet, TSV</p>
+          <input type="file" id="file-input" accept=".csv,.xlsx,.xls,.json,.parquet,.tsv">
+        `;
+        // Reattach listener
+        document.getElementById('file-input').addEventListener('change', e => {
+          if (e.target.files[0]) handleUpload(e.target.files[0]);
+        });
+      }
+    }
+
+    // Initial load
+    fetch('/health').then(r => r.json()).then(h => {
+      document.getElementById('health').textContent = `Model: ${h.ollama_model}`;
+    }).catch(() => {
+      document.getElementById('health').textContent = 'Disconnected';
+    });
+    refreshDatasets();
+  </script>
+</body>
+</html>

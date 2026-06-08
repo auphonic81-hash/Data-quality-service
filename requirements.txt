@@ -1,0 +1,15 @@
+flask==3.0.0
+flask-cors==4.0.0
+pandas==2.2.0
+numpy==1.26.4
+ydata-profiling==4.12.0
+great-expectations==0.18.15
+dedupe==2.0.23
+recordlinkage==0.16
+phonenumbers==8.13.30
+email-validator==2.1.1
+dateparser==1.2.0
+rapidfuzz==3.6.1
+openpyxl==3.1.2
+requests==2.31.0
+python-dotenv==1.0.1
