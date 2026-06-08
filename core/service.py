@@ -13,6 +13,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from .consistency import RecordConsistencyChecker
 from .ingestion import DataIngestion
 from .profiling import DataProfiler
 from .quality_detection import QualityDetector
@@ -39,6 +40,7 @@ class DataQualityService:
         self.schema_inferencer = SchemaInferencer(
             ollama_url=ollama_url, ollama_model=ollama_model
         )
+        self.consistency_checker = RecordConsistencyChecker()
 
         self._cache: dict[str, dict[str, Any]] = {}
 
@@ -71,6 +73,7 @@ class DataQualityService:
 
         quality = self.detector.detect_all(df)
         schema = self.schema_inferencer.infer(df, table_name=table_name)
+        consistency = self.consistency_checker.check(df)
 
         analysis = {
             "dataset_id": dataset_id,
@@ -80,6 +83,7 @@ class DataQualityService:
             "profile_summary": profile["ydata_summary"],
             "custom_findings": profile["custom_findings"],
             "quality_issues": quality,
+            "consistency": consistency,
             "inferred_schema": schema,
             "html_report_path": str(report_path),
             "analyzed_at": datetime.utcnow().isoformat() + "Z",

@@ -140,6 +140,17 @@
     }
     .diff-wrapper { overflow-x: auto; border-radius: 8px; border: 1px solid var(--border); }
     .missing { color: var(--warning); font-style: italic; opacity: 0.7; }
+    .review-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 12px; }
+    .review-table th, .review-table td {
+      padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--border);
+    }
+    .review-table th { color: var(--muted); font-weight: 600; text-transform: uppercase; font-size: 10px; letter-spacing: 0.5px; }
+    .severity-high { color: var(--danger); font-weight: 700; }
+    .severity-medium { color: var(--warning); font-weight: 600; }
+    .review-banner {
+      background: rgba(239, 91, 91, 0.08); border-left: 3px solid var(--danger);
+      padding: 12px 16px; border-radius: 6px; margin-top: 16px;
+    }
 
   </style>
 </head>
@@ -293,11 +304,45 @@
 
       const schemaSql = schema.create_statement || '';
 
+      const consistency = r.consistency || {};
+      const consIssues = consistency.issues || [];
+      let consistencyHtml = '';
+      if (consistency.issue_count > 0) {
+        const rows = consIssues.slice(0, 20).map(iss => `
+          <tr>
+            <td>${iss.row_index}</td>
+            <td>${escapeHtml(iss.name || '')}</td>
+            <td>${escapeHtml(iss.email || '')}</td>
+            <td>${iss.match_score}%</td>
+            <td class="severity-${iss.severity}">${(iss.severity || '').toUpperCase()}</td>
+          </tr>
+        `).join('');
+        consistencyHtml = `
+          <div class="section">
+            <h3>⚠️ Records Needing Human Review</h3>
+            <div class="review-banner">
+              <strong>${consistency.issue_count}</strong> row(s) have fields that don't match
+              (e.g. name vs email mismatch). These are <strong>flagged, not auto-fixed</strong> —
+              they could be legitimate aliases or actual data corruption. Manual review required.
+            </div>
+            <div class="diff-wrapper" style="margin-top: 12px;">
+              <table class="review-table">
+                <thead>
+                  <tr><th>Row</th><th>Name</th><th>Email</th><th>Match</th><th>Severity</th></tr>
+                </thead>
+                <tbody>${rows}</tbody>
+              </table>
+            </div>
+          </div>
+        `;
+      }
+
       document.getElementById('analysis-output').innerHTML = `
         ${stats}
         ${alerts ? `<div class="section"><h3>ydata-profiling Alerts</h3>${alerts}</div>` : ''}
         ${constantCols ? `<div class="section"><h3>Constant Columns</h3>${constantCols}</div>` : ''}
         ${customFindingsHtml ? `<div class="section"><h3>Custom Findings</h3>${customFindingsHtml}</div>` : ''}
+        ${consistencyHtml}
         ${schemaSql ? `<div class="section"><h3>Inferred Schema</h3><pre>${schemaSql}</pre></div>` : ''}
       `;
     }
