@@ -292,6 +292,7 @@
           <button class="btn btn-secondary" onclick="window.open('/api/datasets/${info.dataset_id}/report', '_blank')">View Report</button>
           <button class="btn btn-success" onclick="materializeNormalization()">Split Into Tables</button>
           <button class="btn btn-success" onclick="openEntityResolutionDialog()">Resolve Entities</button>
+          <button class="btn btn-success" onclick="openCrossFileDedupDialog()">Find Duplicates Across Files</button>
         </div>
         <div id="analysis-output" style="margin-top: 24px;"></div>
       `;
@@ -565,7 +566,121 @@
       `;
     }
 
-    function openEntityResolutionDialog() {
+    function openCrossFileDedupDialog() {
+      const list = document.getElementById('cfd-dataset-list');
+      list.innerHTML = '';
+      if (!state.datasets.length) {
+        toast('Upload some files first', 'error');
+        return;
+      }
+      for (const d of state.datasets) {
+        const filename = d.filename || d.source.split('/').pop();
+        const row = document.createElement('label');
+        row.style.cssText = 'display: flex; align-items: center; gap: 10px; padding: 8px; cursor: pointer; font-size: 13px; border-radius: 4px;';
+        row.innerHTML = `
+          <input type="checkbox" value="${d.dataset_id}" style="margin: 0;">
+          <span><strong>${filename}</strong> <span style="color: var(--muted);">(${d.rows} rows)</span></span>
+        `;
+        list.appendChild(row);
+      }
+      document.getElementById('cfd-modal').classList.add('open');
+    }
+
+    function closeCrossFileDedupDialog() {
+      document.getElementById('cfd-modal').classList.remove('open');
+    }
+
+    async function runCrossFileDedup() {
+      const checked = Array.from(
+        document.querySelectorAll('#cfd-dataset-list input[type=checkbox]:checked')
+      ).map(el => el.value);
+      if (checked.length < 2) {
+        toast('Pick at least 2 files', 'error');
+        return;
+      }
+      closeCrossFileDedupDialog();
+      const out = document.getElementById('analysis-output');
+      if (out) out.innerHTML = '<div class="loader"></div> Scanning for shared identifiers across files...';
+      try {
+        const result = await api('/api/find-duplicates-across-files', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ dataset_ids: checked }),
+        });
+        renderCrossFileDedup(result);
+        toast(`Found ${result.summary.total_clusters} duplicate clusters`, 'success');
+      } catch (e) {
+        if (out) out.innerHTML = '';
+        toast(e.message, 'error');
+      }
+    }
+
+    function renderCrossFileDedup(r) {
+      const s = r.summary || {};
+      const reasonHtml = r.reason
+        ? `<div class="review-banner">${escapeHtml(r.reason)}</div>` : '';
+
+      // Per-dataset detection summary
+      const datasetCards = (r.datasets || []).map(d => {
+        const detected = (d.detected_id_columns || []).map(c =>
+          `<span style="font-size: 11px; padding: 2px 8px; background: rgba(56,212,168,0.1); color: var(--success); border-radius: 10px; margin-right: 4px;">${escapeHtml(c.column)} (${c.confidence})</span>`
+        ).join('') || '<span style="color: var(--muted); font-size: 11px;">no identifier columns detected</span>';
+        return `
+          <div class="issue info">
+            <strong>${escapeHtml(d.name)}</strong> <span style="color: var(--muted); font-size: 11px;">— ${d.rows} rows</span>
+            <div style="margin-top: 6px;">Detected IDs: ${detected}</div>
+          </div>
+        `;
+      }).join('');
+
+      // Cluster cards
+      const clusterCards = (r.duplicate_clusters || []).map(c => {
+        const keep = c.recommended_keep || {};
+        const occHtml = c.occurrences.map(o => {
+          const isKept = o.dataset_id === keep.dataset_id && o.row_index === keep.row_index;
+          const badge = isKept
+            ? '<span style="color: var(--success); font-weight: 700; font-size: 11px;">← KEEP</span>'
+            : '<span style="color: var(--danger); font-size: 11px;">→ archive</span>';
+          const dataPreview = Object.entries(o.row_data).slice(0, 6).map(([k, v]) =>
+            `<span style="margin-right: 10px;"><strong style="color: var(--muted); font-size: 11px;">${escapeHtml(k)}:</strong> ${escapeHtml(String(v))}</span>`
+          ).join('');
+          return `
+            <div style="padding: 8px; margin-top: 6px; background: rgba(255,255,255,0.02); border-left: 2px solid ${isKept ? 'var(--success)' : 'var(--danger)'}; border-radius: 4px;">
+              <div style="display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-bottom: 4px;">
+                <span><strong style="color: var(--accent);">${escapeHtml(o.dataset_name)}</strong> · row ${o.row_index} · completeness ${(o.completeness_score * 100).toFixed(0)}%</span>
+                ${badge}
+              </div>
+              <div style="font-size: 12px;">${dataPreview}</div>
+            </div>
+          `;
+        }).join('');
+        return `
+          <div class="match-card high" style="margin-bottom: 14px;">
+            <div class="header">
+              <span>DUPLICATE — ${escapeHtml(c.id_column)} = ${escapeHtml(c.id_value)}</span>
+              <span class="prob">${c.occurrences.length} copies</span>
+            </div>
+            ${occHtml}
+          </div>
+        `;
+      }).join('');
+
+      document.getElementById('analysis-output').innerHTML = `
+        <div class="stat-grid">
+          <div class="stat success"><div class="label">Duplicate Clusters</div><div class="value">${s.total_clusters || 0}</div></div>
+          <div class="stat warn"><div class="label">Duplicate Rows</div><div class="value">${s.total_duplicate_rows || 0}</div></div>
+          <div class="stat danger"><div class="label">Would Archive</div><div class="value">${s.rows_that_would_be_archived || 0}</div></div>
+          <div class="stat"><div class="label">ID Cols Used</div><div class="value" style="font-size: 12px;">${(r.id_columns_used || []).join(', ') || '(none)'}</div></div>
+        </div>
+        <div class="section">
+          <h3>📁 Datasets Scanned</h3>
+          ${reasonHtml}
+          ${datasetCards}
+        </div>
+        ${clusterCards ? `<div class="section"><h3>🔁 Duplicate Clusters</h3>${clusterCards}</div>` : ''}
+      `;
+    }
+
+        function openEntityResolutionDialog() {
       if (!state.activeDataset) {
         toast('Pick a dataset first', 'error');
         return;
@@ -808,6 +923,21 @@
       <div class="modal-actions">
         <button class="btn btn-secondary" onclick="closeEntityResolutionDialog()">Cancel</button>
         <button class="btn btn-success" onclick="runEntityResolution()">Run</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="cfd-modal">
+    <div class="modal">
+      <h2>Find Duplicates Across Files</h2>
+      <p style="color: var(--muted); font-size: 13px; margin-bottom: 12px;">
+        Select 2 or more files. The tool will find rows that share an identifier
+        (bill number, invoice ID, SKU, etc.) across them and recommend which copy to keep.
+      </p>
+      <div id="cfd-dataset-list" style="max-height: 240px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; padding: 8px;"></div>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" onclick="closeCrossFileDedupDialog()">Cancel</button>
+        <button class="btn btn-success" onclick="runCrossFileDedup()">Find Duplicates</button>
       </div>
     </div>
   </div>

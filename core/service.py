@@ -17,6 +17,7 @@ import pandas as pd
 from .catalog import DatasetCatalog
 from .consistency import RecordConsistencyChecker
 from .ingestion import DataIngestion
+from .cross_file_dedup import CrossFileDeduplicator
 from .entity_resolution import EntityResolver
 from .normalizer import SchemaNormalizer
 from .profiling import DataProfiler
@@ -52,6 +53,7 @@ class DataQualityService:
         self.consistency_checker = RecordConsistencyChecker()
         self.normalizer = SchemaNormalizer()
         self.entity_resolver = EntityResolver()
+        self.cross_file_dedup = CrossFileDeduplicator()
 
         self._cache: dict[str, dict[str, Any]] = {}
 
@@ -403,6 +405,33 @@ class DataQualityService:
                 df_a, source_name=name_a, match_threshold=match_threshold,
             )
 
+        return _to_json_safe(result)
+
+    def find_cross_file_duplicates(
+        self,
+        dataset_ids: list[str],
+        id_columns: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Detect rows that share an identifier across multiple datasets."""
+        if len(dataset_ids) < 2:
+            return {
+                "error": "Need at least 2 datasets",
+                "datasets": [], "duplicate_clusters": [],
+                "summary": {"total_clusters": 0, "total_duplicate_rows": 0, "rows_that_would_be_archived": 0},
+            }
+
+        bundles: list[dict[str, Any]] = []
+        for ds_id in dataset_ids:
+            catalog_row = self.catalog.get_dataset(ds_id)
+            if not catalog_row:
+                raise KeyError(f"Dataset {ds_id} not found")
+            bundles.append({
+                "dataset_id": ds_id,
+                "name": catalog_row["filename"],
+                "dataframe": self._get_dataset(ds_id),
+            })
+
+        result = self.cross_file_dedup.find_duplicates(bundles, id_columns=id_columns)
         return _to_json_safe(result)
 
     def _get_dataset(self, dataset_id: str) -> pd.DataFrame:

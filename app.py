@@ -271,5 +271,30 @@ def resolve_entities():
         return jsonify({"error": str(exc)}), 500
 
 
+
+
+@app.route("/api/find-duplicates-across-files", methods=["POST"])
+def find_duplicates_across_files():
+    """Find rows sharing identifier values across multiple datasets.
+
+    Body:
+      {
+        "dataset_ids": ["id1", "id2", "id3", ...],
+        "id_columns": ["bill_no", "invoice_ref"]   // optional — auto-detect if absent
+      }
+    """
+    payload = request.get_json(silent=True) or {}
+    dataset_ids = payload.get("dataset_ids") or []
+    id_columns = payload.get("id_columns")
+    if not isinstance(dataset_ids, list) or len(dataset_ids) < 2:
+        return jsonify({"error": "dataset_ids must be a list of at least 2 ids"}), 400
+    try:
+        return jsonify(service.find_cross_file_duplicates(dataset_ids, id_columns))
+    except KeyError as exc:
+        return jsonify({"error": str(exc)}), 404
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
 if __name__ == "__main__":
     app.run(host=config.HOST, port=config.PORT, debug=config.DEBUG)
