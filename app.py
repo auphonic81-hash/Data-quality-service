@@ -326,5 +326,21 @@ def archive_duplicates_endpoint():
         return jsonify({"error": str(exc)}), 500
 
 
+
+
+@app.route("/api/datasets/<dataset_id>/archived-rows", methods=["GET"])
+def list_archived_rows(dataset_id: str):
+    """Return all rows archived from a dataset (recoverable, not deleted)."""
+    try:
+        rows = service.catalog.list_archived_rows(dataset_id)
+        return jsonify({
+            "dataset_id": dataset_id,
+            "count": len(rows),
+            "archived_rows": rows,
+        })
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
 if __name__ == "__main__":
     app.run(host=config.HOST, port=config.PORT, debug=config.DEBUG)

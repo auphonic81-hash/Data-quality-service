@@ -261,14 +261,55 @@
         list.innerHTML = '<div class="empty-state" style="padding: 24px 0;"><p style="font-size: 13px;">No datasets loaded yet</p></div>';
         return;
       }
-      list.innerHTML = state.datasets.map(d => `
+      list.innerHTML = state.datasets.map(d => {
+        const filename = (d.filename || d.source).split('/').pop().split('::').pop();
+        return `
         <div class="dataset-item ${d.dataset_id === state.activeDataset ? 'active' : ''}" data-id="${d.dataset_id}">
-          <div class="name">${d.source.split('/').pop().split('::').pop()}</div>
-          <div class="meta">${d.rows} rows • ${d.columns} cols ${d.remediated ? '• ✓ cleaned' : ''}</div>
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+            <div style="min-width: 0; flex: 1;">
+              <div class="name" title="${escapeAttr(filename)}" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(filename)}</div>
+              <div class="meta">${d.rows} rows • ${d.columns} cols${d.remediated ? ' • ✓ cleaned' : ''}</div>
+            </div>
+            <button class="ds-delete" data-id="${d.dataset_id}" data-name="${escapeAttr(filename)}"
+              title="Delete this dataset"
+              style="background: transparent; border: 1px solid var(--border); color: var(--muted); border-radius: 4px; padding: 2px 6px; cursor: pointer; font-size: 11px; line-height: 1;">
+              ×
+            </button>
+          </div>
         </div>
-      `).join('');
+      `;}).join('');
+
+      // Row click selects the dataset, but the × button deletes it.
       list.querySelectorAll('.dataset-item').forEach(el => {
-        el.addEventListener('click', () => selectDataset(el.dataset.id));
+        el.addEventListener('click', (e) => {
+          if (e.target.closest('.ds-delete')) return;  // delete handler takes over
+          selectDataset(el.dataset.id);
+        });
+      });
+      list.querySelectorAll('.ds-delete').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const id = btn.dataset.id;
+          const name = btn.dataset.name;
+          if (!confirm(`Delete "${name}" from the catalog? This removes the dataset, all its versions, and analysis history. Archived rows are kept.`)) return;
+          try {
+            const res = await fetch(`/api/datasets/${id}`, { method: 'DELETE' });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Delete failed');
+            toast(`Deleted ${name}`, 'success');
+            if (state.activeDataset === id) {
+              state.activeDataset = null;
+              document.getElementById('results-content').innerHTML = `
+                <div class="empty-state">
+                  <h3>Upload a file to begin</h3>
+                  <p>Profile, validate, and clean your data automatically</p>
+                </div>`;
+            }
+            await refreshDatasets();
+          } catch (e2) {
+            toast(e2.message, 'error');
+          }
+        });
       });
     }
 
@@ -293,6 +334,7 @@
           <button class="btn btn-success" onclick="materializeNormalization()">Split Into Tables</button>
           <button class="btn btn-success" onclick="openEntityResolutionDialog()">Resolve Entities</button>
           <button class="btn btn-success" onclick="openCrossFileDedupDialog()">Find Duplicates Across Files</button>
+          <button class="btn btn-secondary" onclick="viewArchivedRows()">View Archived Rows</button>
         </div>
         <div id="analysis-output" style="margin-top: 24px;"></div>
       `;
@@ -759,7 +801,22 @@
             </div>
             ${clusterCards}
           </div>
-        ` : ''}
+        ` : (s.total_clusters === 0 && (r.id_columns_used || []).length > 0 ? `
+          <div class="section">
+            <h3>✓ No Duplicates Detected</h3>
+            <div class="review-banner" style="border-left-color: var(--success);">
+              The selected datasets were scanned successfully and no duplicate rows were found.
+              Identifier columns used: <strong>${(r.id_columns_used || []).map(c => escapeHtml(c)).join(', ')}</strong>.
+              <br><br>
+              This typically means one of:
+              <ul style="margin: 8px 0 0 20px; padding: 0; color: var(--muted); font-size: 13px;">
+                <li>The files genuinely contain different records (no overlap)</li>
+                <li>Previous dedup operations already archived the duplicates — check Archived Rows in the catalog</li>
+                <li>The identifier columns have no matching values across files</li>
+              </ul>
+            </div>
+          </div>
+        ` : '')}
       `;
     }
 
@@ -924,6 +981,78 @@
 
     function _erToggleMedium() { _erShowMedium = !_erShowMedium; _renderEntityResolutionView(); }
     function _erToggleLow() { _erShowLow = !_erShowLow; _renderEntityResolutionView(); }
+
+        async function viewArchivedRows() {
+      if (!state.activeDataset) {
+        toast('Pick a dataset first', 'error');
+        return;
+      }
+      const out = document.getElementById('analysis-output');
+      if (out) out.innerHTML = '<div class="loader"></div> Loading archived rows...';
+      try {
+        const result = await api(`/api/datasets/${state.activeDataset}/archived-rows`);
+        renderArchivedRows(result);
+      } catch (e) {
+        if (out) out.innerHTML = '';
+        toast(e.message, 'error');
+      }
+    }
+
+    function renderArchivedRows(r) {
+      if (!r.count) {
+        document.getElementById('analysis-output').innerHTML = `
+          <div class="section">
+            <h3>📦 Archived Rows</h3>
+            <div class="review-banner" style="border-left-color: var(--accent);">
+              No rows have been archived from this dataset.
+              <br><br>
+              <span style="font-size: 12px; color: var(--muted);">
+                Rows are archived when cross-file deduplication finds duplicates and the user confirms removal.
+                Archived rows are kept here permanently — recoverable, never deleted.
+              </span>
+            </div>
+          </div>
+        `;
+        return;
+      }
+
+      const rowsHtml = r.archived_rows.map(row => {
+        const dataPreview = Object.entries(row.row_data || {}).slice(0, 8).map(([k, v]) =>
+          `<span style="margin-right: 12px;"><strong style="color: var(--muted); font-size: 11px;">${escapeHtml(k)}:</strong> ${escapeHtml(String(v))}</span>`
+        ).join('');
+        const archivedAt = new Date(row.archived_at).toLocaleString();
+        const reasonLabel = row.id_column && row.id_value
+          ? `Duplicate of ${row.id_column}=${row.id_value}`
+          : (row.reason || 'archived');
+        return `
+          <div style="padding: 12px; margin-bottom: 8px; background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-left: 3px solid var(--warning); border-radius: 6px;">
+            <div style="display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-bottom: 6px;">
+              <span>Row index ${row.original_row_index} · archived ${archivedAt}</span>
+              <span style="color: var(--warning);">${escapeHtml(reasonLabel)}</span>
+            </div>
+            <div style="font-size: 12px;">${dataPreview}</div>
+          </div>
+        `;
+      }).join('');
+
+      document.getElementById('analysis-output').innerHTML = `
+        <div class="stat-grid">
+          <div class="stat warn"><div class="label">Archived Rows</div><div class="value">${r.count}</div></div>
+          <div class="stat"><div class="label">Status</div><div class="value" style="font-size: 14px;">Recoverable</div></div>
+          <div class="stat"><div class="label">Storage</div><div class="value" style="font-size: 12px;">Catalog DB</div></div>
+          <div class="stat"><div class="label">Deletable</div><div class="value" style="font-size: 14px;">No</div></div>
+        </div>
+        <div class="section">
+          <h3>📦 Archived Rows (Recoverable)</h3>
+          <div class="review-banner" style="border-left-color: var(--success); margin-bottom: 12px;">
+            Every row removed from active data is preserved here with full original content,
+            timestamp, and reason. This is the audit trail enterprise clients require —
+            <strong>nothing is ever silently destroyed.</strong>
+          </div>
+          ${rowsHtml}
+        </div>
+      `;
+    }
 
         function toast(msg, type = 'info') {
       const t = document.createElement('div');
