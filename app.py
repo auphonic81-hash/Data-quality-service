@@ -296,5 +296,35 @@ def find_duplicates_across_files():
         return jsonify({"error": str(exc)}), 500
 
 
+
+
+@app.route("/api/archive-duplicates", methods=["POST"])
+def archive_duplicates_endpoint():
+    """Execute an archive plan from cross-file dedup.
+
+    Body:
+      {
+        "archive_plan": [
+          {
+            "dataset_id": str,
+            "row_indices": [int, ...],
+            "id_column": str,
+            "id_value": str,
+            "related_dataset_id": str,
+            "related_row_index": int
+          }, ...
+        ]
+      }
+    """
+    payload = request.get_json(silent=True) or {}
+    plan = payload.get("archive_plan") or []
+    if not isinstance(plan, list) or not plan:
+        return jsonify({"error": "archive_plan must be a non-empty list"}), 400
+    try:
+        return jsonify(service.archive_duplicate_rows(plan))
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
 if __name__ == "__main__":
     app.run(host=config.HOST, port=config.PORT, debug=config.DEBUG)

@@ -434,6 +434,119 @@ class DataQualityService:
         result = self.cross_file_dedup.find_duplicates(bundles, id_columns=id_columns)
         return _to_json_safe(result)
 
+    def archive_duplicate_rows(
+        self,
+        archive_plan: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Execute the archive plan from cross-file dedup.
+
+        archive_plan is a list of:
+          {
+            "dataset_id":      str,   # dataset to remove rows from
+            "row_indices":     [int], # which rows to archive
+            "id_column":       str,   # for audit
+            "id_value":        str,   # for audit
+            "related_dataset_id": str, # which dataset kept the master copy
+            "related_row_index":  int,
+          }
+
+        For each affected dataset, we:
+          1. Save the rows to the archive table (with metadata)
+          2. Create a NEW version of the dataset on disk with those rows removed
+          3. Update the catalog so the active version points at the cleaned file
+          4. Write a remediation audit row
+        """
+        # Group plan entries by dataset_id so we touch each file only once
+        from collections import defaultdict
+        per_dataset: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for entry in archive_plan:
+            per_dataset[entry["dataset_id"]].append(entry)
+
+        result_per_dataset: list[dict[str, Any]] = []
+
+        for dataset_id, entries in per_dataset.items():
+            catalog_row = self.catalog.get_dataset(dataset_id)
+            if not catalog_row:
+                continue
+            df = self._get_dataset(dataset_id)
+            from_version = catalog_row["current_version"]
+
+            # Collect row indices to archive + build archive records
+            rows_to_archive: list[dict[str, Any]] = []
+            indices_to_drop: set[int] = set()
+            for entry in entries:
+                for row_idx in entry.get("row_indices", []):
+                    if row_idx < 0 or row_idx >= len(df):
+                        continue
+                    indices_to_drop.add(int(row_idx))
+                    rows_to_archive.append({
+                        "original_row_index": int(row_idx),
+                        "row_data": df.iloc[row_idx].fillna("").astype(str).to_dict(),
+                        "related_dataset_id": entry.get("related_dataset_id"),
+                        "related_row_index": entry.get("related_row_index"),
+                        "id_column": entry.get("id_column"),
+                        "id_value": entry.get("id_value"),
+                    })
+
+            if not rows_to_archive:
+                continue
+
+            # Save the rows in the archive table
+            archive_ids = self.catalog.archive_rows(
+                dataset_id=dataset_id,
+                rows=rows_to_archive,
+                reason="cross_file_duplicate",
+            )
+
+            # Build a new DataFrame without the archived rows
+            keep_mask = ~df.index.isin(indices_to_drop)
+            new_df = df[keep_mask].reset_index(drop=True)
+
+            # Persist as a new immutable version
+            new_csv = self.raw_files_dir / f"{dataset_id}_v{from_version + 1}.csv"
+            new_df.to_csv(new_csv, index=False)
+            new_version = self.catalog.add_version(
+                dataset_id=dataset_id,
+                csv_path=new_csv,
+                change_summary=f"Archived {len(rows_to_archive)} duplicate rows (cross-file dedup)",
+            )
+
+            # Audit row
+            self.catalog.record_remediation(
+                dataset_id=dataset_id,
+                from_version=from_version,
+                to_version=new_version,
+                change_log={
+                    "cross_file_dedup": {
+                        "archived_count": len(rows_to_archive),
+                        "archive_ids": archive_ids,
+                    }
+                },
+                total_changes=len(rows_to_archive),
+                total_failures=0,
+            )
+
+            # Refresh the in-memory cache to the new version
+            self._cache[dataset_id] = {
+                "dataframe": new_df,
+                "source": catalog_row["source"],
+                "loaded_at": catalog_row["loaded_at"],
+            }
+
+            result_per_dataset.append({
+                "dataset_id": dataset_id,
+                "filename": catalog_row["filename"],
+                "archived_count": len(rows_to_archive),
+                "from_version": from_version,
+                "to_version": new_version,
+                "remaining_rows": int(len(new_df)),
+            })
+
+        return _to_json_safe({
+            "datasets_affected": result_per_dataset,
+            "total_archived": sum(d["archived_count"] for d in result_per_dataset),
+        })
+
     def _get_dataset(self, dataset_id: str) -> pd.DataFrame:
         """Get a dataset's DataFrame. Loads from disk on cache miss."""
         # Fast path: already in memory

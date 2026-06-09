@@ -614,7 +614,79 @@
       }
     }
 
+    async function archiveCrossFileDuplicates() {
+      const r = _cfdLastResult;
+      if (!r || !r.duplicate_clusters || !r.duplicate_clusters.length) {
+        toast('Nothing to archive', 'error'); return;
+      }
+      if (!confirm(`Archive ${r.summary.rows_that_would_be_archived} duplicate rows? They will be removed from the active datasets but kept in the archive (recoverable).`)) {
+        return;
+      }
+      // Build the archive plan from the clusters
+      const planByDataset = {};
+      for (const cluster of r.duplicate_clusters) {
+        const keep = cluster.recommended_keep || {};
+        for (const occ of cluster.occurrences) {
+          if (occ.dataset_id === keep.dataset_id && occ.row_index === keep.row_index) continue;
+          const key = occ.dataset_id;
+          if (!planByDataset[key]) {
+            planByDataset[key] = {
+              dataset_id: occ.dataset_id,
+              row_indices: [],
+              id_column: cluster.id_column,
+              id_value: cluster.id_value,
+              related_dataset_id: keep.dataset_id,
+              related_row_index: keep.row_index,
+            };
+          }
+          planByDataset[key].row_indices.push(occ.row_index);
+        }
+      }
+      const archive_plan = Object.values(planByDataset);
+      const out = document.getElementById('analysis-output');
+      if (out) out.innerHTML = '<div class="loader"></div> Archiving duplicate rows...';
+      try {
+        const result = await api('/api/archive-duplicates', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ archive_plan }),
+        });
+        toast(`Archived ${result.total_archived} rows`, 'success');
+        // Re-render with summary of what was archived
+        const summaryHtml = result.datasets_affected.map(d => `
+          <div class="issue info">
+            <strong>${escapeHtml(d.filename)}</strong>: archived ${d.archived_count} rows
+            <div style="font-size: 11px; color: var(--muted); margin-top: 4px;">
+              v${d.from_version} → v${d.to_version} · ${d.remaining_rows} rows remaining
+            </div>
+          </div>
+        `).join('');
+        out.innerHTML = `
+          <div class="stat-grid">
+            <div class="stat success"><div class="label">Rows Archived</div><div class="value">${result.total_archived}</div></div>
+            <div class="stat"><div class="label">Datasets Affected</div><div class="value">${result.datasets_affected.length}</div></div>
+            <div class="stat"><div class="label">Status</div><div class="value" style="font-size: 14px;">Archived (recoverable)</div></div>
+            <div class="stat"><div class="label">Audit</div><div class="value" style="font-size: 11px;">Logged in catalog</div></div>
+          </div>
+          <div class="section">
+            <h3>✅ Archive Complete</h3>
+            <div class="review-banner" style="border-left-color: var(--success);">
+              Duplicate rows have been removed from the active datasets and saved to the archive table.
+              They can be restored later from the catalog if needed. Each dataset has a new immutable version on disk.
+            </div>
+            ${summaryHtml}
+          </div>
+        `;
+        refreshDatasets();
+      } catch (e) {
+        if (out) out.innerHTML = '';
+        toast(e.message, 'error');
+      }
+    }
+
+        let _cfdLastResult = null;
+
     function renderCrossFileDedup(r) {
+      _cfdLastResult = r;
       const s = r.summary || {};
       const reasonHtml = r.reason
         ? `<div class="review-banner">${escapeHtml(r.reason)}</div>` : '';
@@ -676,7 +748,18 @@
           ${reasonHtml}
           ${datasetCards}
         </div>
-        ${clusterCards ? `<div class="section"><h3>🔁 Duplicate Clusters</h3>${clusterCards}</div>` : ''}
+        ${clusterCards ? `
+          <div class="section">
+            <h3>🔁 Duplicate Clusters</h3>
+            <div style="display: flex; gap: 8px; margin-bottom: 14px; align-items: center;">
+              <button class="btn btn-success" onclick="archiveCrossFileDuplicates()">Archive ${s.rows_that_would_be_archived || 0} Duplicate Rows</button>
+              <span style="font-size: 12px; color: var(--muted);">
+                Recommended rows are removed from active datasets and saved to the archive — recoverable, not deleted.
+              </span>
+            </div>
+            ${clusterCards}
+          </div>
+        ` : ''}
       `;
     }
 

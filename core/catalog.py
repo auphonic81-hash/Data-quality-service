@@ -72,6 +72,23 @@ class DatasetCatalog:
         ON analyses(dataset_id, run_at);
     CREATE INDEX IF NOT EXISTS idx_remediations_dataset
         ON remediations(dataset_id, applied_at);
+
+    CREATE TABLE IF NOT EXISTS archived_rows (
+        archive_id TEXT PRIMARY KEY,
+        dataset_id TEXT NOT NULL,
+        original_row_index INTEGER NOT NULL,
+        row_data_json TEXT NOT NULL,
+        archived_at TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        related_dataset_id TEXT,
+        related_row_index INTEGER,
+        id_column TEXT,
+        id_value TEXT,
+        FOREIGN KEY (dataset_id) REFERENCES datasets(dataset_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_archive_dataset
+        ON archived_rows(dataset_id, archived_at);
     """
 
     def __init__(self, db_path: str | Path):
@@ -270,6 +287,65 @@ class DatasetCatalog:
                 (dataset_id,),
             ).fetchall()
             return [dict(r) for r in rows]
+
+
+    # ─── Archived rows ────────────────────────────────────────────────────
+
+    def archive_rows(
+        self, dataset_id: str, rows: list[dict[str, Any]],
+        reason: str = "duplicate",
+    ) -> list[str]:
+        """Save rows to the archive. Returns the archive_ids created.
+
+        Each entry in `rows` should be a dict with:
+          - original_row_index (int)
+          - row_data (dict)
+          - related_dataset_id (optional)
+          - related_row_index (optional)
+          - id_column (optional)
+          - id_value (optional)
+        """
+        archive_ids: list[str] = []
+        now = _utc_now()
+        with self._connect() as conn:
+            for r in rows:
+                archive_id = uuid.uuid4().hex[:12]
+                conn.execute(
+                    "INSERT INTO archived_rows ("
+                    "archive_id, dataset_id, original_row_index, row_data_json, "
+                    "archived_at, reason, related_dataset_id, related_row_index, "
+                    "id_column, id_value) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        archive_id, dataset_id,
+                        int(r["original_row_index"]),
+                        json.dumps(r["row_data"], ensure_ascii=False, default=str),
+                        now, reason,
+                        r.get("related_dataset_id"),
+                        r.get("related_row_index"),
+                        r.get("id_column"),
+                        r.get("id_value"),
+                    ),
+                )
+                archive_ids.append(archive_id)
+        return archive_ids
+
+    def list_archived_rows(self, dataset_id: str) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT * FROM archived_rows WHERE dataset_id = ? "
+                "ORDER BY archived_at DESC", (dataset_id,),
+            ).fetchall()
+            out = []
+            for r in rows:
+                d = dict(r)
+                try:
+                    d["row_data"] = json.loads(d["row_data_json"])
+                except Exception:
+                    d["row_data"] = {}
+                del d["row_data_json"]
+                out.append(d)
+            return out
 
     # ─── Connection helper ───────────────────────────────────────────────
 
