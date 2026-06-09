@@ -147,6 +147,42 @@
     .review-table th { color: var(--muted); font-weight: 600; text-transform: uppercase; font-size: 10px; letter-spacing: 0.5px; }
     .severity-high { color: var(--danger); font-weight: 700; }
     .severity-medium { color: var(--warning); font-weight: 600; }
+    .modal-backdrop {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.7);
+      display: none; align-items: center; justify-content: center; z-index: 1000;
+    }
+    .modal-backdrop.open { display: flex; }
+    .modal {
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: 10px; padding: 24px; max-width: 480px; width: 90%;
+    }
+    .modal h2 { margin: 0 0 16px; font-size: 18px; }
+    .modal label { display: block; margin-bottom: 14px; font-size: 13px; color: var(--muted); }
+    .modal select, .modal input {
+      width: 100%; margin-top: 6px; background: var(--bg); color: var(--text);
+      border: 1px solid var(--border); border-radius: 6px; padding: 8px;
+      font-size: 14px;
+    }
+    .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 18px; }
+    .match-card {
+      background: rgba(255,255,255,0.02); border: 1px solid var(--border);
+      border-left: 3px solid var(--success); border-radius: 8px;
+      padding: 14px; margin-bottom: 10px;
+    }
+    .match-card.medium { border-left-color: var(--warning); }
+    .match-card.low { border-left-color: var(--muted); }
+    .match-card .header {
+      display: flex; justify-content: space-between; margin-bottom: 8px;
+      font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted);
+    }
+    .match-card .prob { color: var(--success); font-weight: 700; }
+    .match-card.medium .prob { color: var(--warning); }
+    .match-card.low .prob { color: var(--muted); }
+    .match-card .pair {
+      display: grid; grid-template-columns: 1fr auto 1fr; gap: 12px; align-items: center;
+    }
+    .match-card .side { font-size: 13px; }
+    .match-card .arrow { color: var(--accent); font-size: 18px; font-weight: 700; }
     .review-banner {
       background: rgba(239, 91, 91, 0.08); border-left: 3px solid var(--danger);
       padding: 12px 16px; border-radius: 6px; margin-top: 16px;
@@ -255,6 +291,7 @@
           <button class="btn btn-secondary" onclick="exportDataset()">Export CSV</button>
           <button class="btn btn-secondary" onclick="window.open('/api/datasets/${info.dataset_id}/report', '_blank')">View Report</button>
           <button class="btn btn-success" onclick="materializeNormalization()">Split Into Tables</button>
+          <button class="btn btn-success" onclick="openEntityResolutionDialog()">Resolve Entities</button>
         </div>
         <div id="analysis-output" style="margin-top: 24px;"></div>
       `;
@@ -528,7 +565,169 @@
       `;
     }
 
-    function toast(msg, type = 'info') {
+    function openEntityResolutionDialog() {
+      if (!state.activeDataset) {
+        toast('Pick a dataset first', 'error');
+        return;
+      }
+      const selA = document.getElementById('er-source-a');
+      const selB = document.getElementById('er-source-b');
+      selA.innerHTML = '';
+      selB.innerHTML = '<option value="">— None (dedup within A) —</option>';
+      for (const d of state.datasets) {
+        const filename = (d.filename || d.source.split('/').pop());
+        const meta = `${d.rows} rows`;
+        const opt = document.createElement('option');
+        opt.value = d.dataset_id;
+        opt.textContent = `${filename} (${meta})`;
+        if (d.dataset_id === state.activeDataset) opt.selected = true;
+        selA.appendChild(opt);
+
+        const opt2 = opt.cloneNode(true);
+        opt2.selected = false;
+        selB.appendChild(opt2);
+      }
+      document.getElementById('er-modal').classList.add('open');
+    }
+
+    function closeEntityResolutionDialog() {
+      document.getElementById('er-modal').classList.remove('open');
+    }
+
+    async function runEntityResolution() {
+      const a = document.getElementById('er-source-a').value;
+      const b = document.getElementById('er-source-b').value;
+      const strictness = document.getElementById('er-strictness').value;
+      const threshold = strictness === 'strict' ? 0.85
+                       : strictness === 'loose' ? 0.3
+                       : 0.5;
+      if (!a) { toast('Pick Source A', 'error'); return; }
+      if (b && b === a) { toast('Source A and B must differ', 'error'); return; }
+      closeEntityResolutionDialog();
+
+      const out = document.getElementById('analysis-output');
+      if (out) out.innerHTML = '<div class="loader"></div> Resolving entities... (Splink is matching records)';
+      try {
+        const payload = { dataset_id_a: a, match_threshold: threshold };
+        if (b) payload.dataset_id_b = b;
+        const result = await api('/api/resolve-entities', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        renderEntityResolution(result);
+        toast(`Found ${result.summary.total} candidate matches`, 'success');
+      } catch (e) {
+        if (out) out.innerHTML = '';
+        toast(e.message, 'error');
+      }
+    }
+
+    // Store latest entity resolution result so toggles can re-render without re-running
+    let _erLastResult = null;
+    let _erShowMedium = false;
+    let _erShowLow = false;
+
+    function renderEntityResolution(r) {
+      _erLastResult = r;
+      _erShowMedium = false;
+      _erShowLow = false;
+      _renderEntityResolutionView();
+    }
+
+    function _renderEntityResolutionView() {
+      const r = _erLastResult;
+      if (!r) return;
+      const s = r.summary || {};
+      const modeLabel = r.mode === 'link_across' ? 'Cross-source linking' : 'Within-source deduplication';
+      const reasonHtml = r.reason
+        ? `<div class="review-banner">${escapeHtml(r.reason)}</div>` : '';
+
+      // Filter matches by which tiers are visible
+      const allMatches = r.matches || [];
+      const visible = allMatches.filter(m =>
+        m.confidence === 'high'
+        || (m.confidence === 'medium' && _erShowMedium)
+        || (m.confidence === 'low' && _erShowLow)
+      );
+
+      // Group matches by left-side entity (one row per left person, candidates underneath)
+      const groups = {};
+      for (const m of visible) {
+        const key = m.left_id + '|' + JSON.stringify(m.left_values);
+        if (!groups[key]) {
+          groups[key] = { left_values: m.left_values, candidates: [] };
+        }
+        groups[key].candidates.push(m);
+      }
+
+      const groupCards = Object.values(groups).map(g => {
+        const leftHtml = Object.entries(g.left_values).map(([k, v]) =>
+          `<span style="margin-right: 12px;"><strong style="color: var(--muted); font-size: 11px;">${escapeHtml(k)}:</strong> ${escapeHtml(v)}</span>`
+        ).join('');
+
+        const candidateRows = g.candidates.map(m => {
+          const sigPills = Object.entries(m.signals || {}).map(([k, v]) => {
+            const isMatch = String(v).includes('exact_match') || String(v).includes('strong_match');
+            const color = isMatch ? 'var(--success)' : 'var(--muted)';
+            return `<span style="color: ${color}; font-size: 11px; margin-right: 8px;">${escapeHtml(k)}: ${escapeHtml(v)}</span>`;
+          }).join('');
+          const rightHtml = Object.entries(m.right_values).map(([k, v]) =>
+            `<span style="margin-right: 12px;"><strong style="color: var(--muted); font-size: 11px;">${escapeHtml(k)}:</strong> ${escapeHtml(v)}</span>`
+          ).join('');
+          return `
+            <div class="match-card ${m.confidence}" style="margin-left: 24px; margin-top: 6px;">
+              <div class="header">
+                <span>↳ ${m.confidence.toUpperCase()}</span>
+                <span class="prob">${(m.match_probability * 100).toFixed(1)}%</span>
+              </div>
+              <div style="font-size: 13px;">${rightHtml}</div>
+              <div style="margin-top: 6px;">${sigPills}</div>
+            </div>
+          `;
+        }).join('');
+
+        return `
+          <div style="margin-bottom: 20px; padding: 12px; background: rgba(255,255,255,0.02); border-radius: 8px; border: 1px solid var(--border);">
+            <div style="font-size: 13px; margin-bottom: 4px;"><strong style="color: var(--accent);">Source A row</strong></div>
+            <div style="font-size: 13px; margin-bottom: 8px;">${leftHtml}</div>
+            <div style="font-size: 11px; color: var(--muted); margin-bottom: 6px;">${g.candidates.length} candidate ${g.candidates.length === 1 ? 'match' : 'matches'} in Source B:</div>
+            ${candidateRows}
+          </div>
+        `;
+      }).join('');
+
+      // Toggles for medium/low visibility
+      const mediumBtnLabel = _erShowMedium ? 'Hide medium' : `Show medium (${s.medium || 0})`;
+      const lowBtnLabel = _erShowLow ? 'Hide low' : `Show low (${s.low || 0})`;
+
+      document.getElementById('analysis-output').innerHTML = `
+        <div class="stat-grid">
+          <div class="stat success"><div class="label">Total Candidates</div><div class="value">${s.total || 0}</div></div>
+          <div class="stat success"><div class="label">High (multi-signal)</div><div class="value">${s.high || 0}</div></div>
+          <div class="stat warn"><div class="label">Medium (review)</div><div class="value">${s.medium || 0}</div></div>
+          <div class="stat"><div class="label">Low</div><div class="value">${s.low || 0}</div></div>
+        </div>
+        <div class="section">
+          <h3>🔗 ${modeLabel}</h3>
+          ${reasonHtml}
+          <div style="font-size: 12px; color: var(--muted); margin-bottom: 12px;">
+            Matched on signals: ${(r.shared_signals || r.match_columns || []).map(c => `<code>${escapeHtml(c)}</code>`).join(', ') || '(none)'}
+            &nbsp;•&nbsp; Evaluated ${r.candidate_pairs_evaluated || '?'} candidate pairs
+          </div>
+          <div style="margin-bottom: 16px; display: flex; gap: 8px;">
+            <button class="btn btn-secondary" onclick="_erToggleMedium()" style="padding: 6px 12px; font-size: 12px;">${mediumBtnLabel}</button>
+            <button class="btn btn-secondary" onclick="_erToggleLow()" style="padding: 6px 12px; font-size: 12px;">${lowBtnLabel}</button>
+          </div>
+          ${groupCards || `<div class="empty-state"><p>No ${_erShowMedium || _erShowLow ? 'matches' : 'high-confidence matches'} at this threshold. Try lowering the threshold or showing medium-confidence candidates.</p></div>`}
+        </div>
+      `;
+    }
+
+    function _erToggleMedium() { _erShowMedium = !_erShowMedium; _renderEntityResolutionView(); }
+    function _erToggleLow() { _erShowLow = !_erShowLow; _renderEntityResolutionView(); }
+
+        function toast(msg, type = 'info') {
       const t = document.createElement('div');
       t.className = `toast ${type}`;
       t.textContent = msg;
@@ -586,5 +785,31 @@
     });
     refreshDatasets();
   </script>
+
+  <div class="modal-backdrop" id="er-modal">
+    <div class="modal">
+      <h2>Resolve Entities Across Sources</h2>
+      <label>
+        Source A
+        <select id="er-source-a"></select>
+      </label>
+      <label>
+        Source B <span style="color: var(--muted)">(leave empty to dedup within Source A)</span>
+        <select id="er-source-b"><option value="">— None (dedup within A) —</option></select>
+      </label>
+      <label>
+        Matching strictness
+        <select id="er-strictness">
+          <option value="strict">Strict — only highly confident matches</option>
+          <option value="balanced" selected>Balanced — recommended default</option>
+          <option value="loose">Loose — show more candidates to review</option>
+        </select>
+      </label>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" onclick="closeEntityResolutionDialog()">Cancel</button>
+        <button class="btn btn-success" onclick="runEntityResolution()">Run</button>
+      </div>
+    </div>
+  </div>
 </body>
 </html>

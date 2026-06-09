@@ -203,5 +203,73 @@ def health():
     })
 
 
+
+
+@app.route("/api/datasets/<dataset_id>/history", methods=["GET"])
+def dataset_history(dataset_id: str):
+    """Return versions, analyses, and remediations for a dataset."""
+    try:
+        return jsonify(service.get_history(dataset_id))
+    except KeyError as exc:
+        return jsonify({"error": str(exc)}), 404
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/datasets/<dataset_id>/rollback", methods=["POST"])
+def rollback_dataset(dataset_id: str):
+    """Roll back to a previous version. Body: {"version_number": int}"""
+    payload = request.get_json(silent=True) or {}
+    version = payload.get("version_number")
+    if not isinstance(version, int):
+        return jsonify({"error": "version_number (int) is required"}), 400
+    try:
+        return jsonify(service.rollback(dataset_id, version))
+    except KeyError as exc:
+        return jsonify({"error": str(exc)}), 404
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/datasets/<dataset_id>", methods=["DELETE"])
+def delete_dataset(dataset_id: str):
+    """Delete a dataset and all related history."""
+    try:
+        ok = service.catalog.delete_dataset(dataset_id)
+        service._cache.pop(dataset_id, None)
+        return jsonify({"deleted": ok, "dataset_id": dataset_id})
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+
+
+@app.route("/api/resolve-entities", methods=["POST"])
+def resolve_entities():
+    """Cross-source entity resolution.
+
+    Body:
+      {
+        "dataset_id_a": "abc123",
+        "dataset_id_b": "def456",        // optional — if omitted, dedup within A
+        "match_threshold": 0.7            // optional
+      }
+    """
+    payload = request.get_json(silent=True) or {}
+    a = payload.get("dataset_id_a")
+    b = payload.get("dataset_id_b")
+    threshold = float(payload.get("match_threshold", 0.7))
+    if not a:
+        return jsonify({"error": "dataset_id_a is required"}), 400
+    try:
+        return jsonify(service.resolve_entities(a, b, threshold))
+    except KeyError as exc:
+        return jsonify({"error": str(exc)}), 404
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
 if __name__ == "__main__":
     app.run(host=config.HOST, port=config.PORT, debug=config.DEBUG)
