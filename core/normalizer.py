@@ -175,27 +175,122 @@ class SchemaNormalizer:
     # ─── Step 3: name entities ────────────────────────────────────────────
 
     def _suggest_entity_name(self, columns: list[str]) -> str:
-        """Pick a sensible table name from the column prefixes."""
-        # Find common prefix (e.g. owner_name + owner_email → "owner")
-        prefixes: list[str] = []
+        """Pick a sensible table name by inspecting all the column names."""
+        from collections import Counter
+
+        # Strategy 1: shared first-token prefix
+        # Strategy 2: any token that appears in 2+ columns
+        # Strategy 3: semantic mapping for known column patterns
+        # Strategy 4: combine top tokens
+
+        all_tokens: list[str] = []
+        first_tokens: list[str] = []
         for col in columns:
-            tokens = re.split(r"[_\W]+", col.lower())
+            tokens = [t for t in re.split(r"[_\W]+", col.lower()) if t and t not in self._STOP_TOKENS]
             if tokens:
-                prefixes.append(tokens[0])
+                first_tokens.append(tokens[0])
+                all_tokens.extend(tokens)
 
-        if prefixes:
-            from collections import Counter
-            most_common = Counter(prefixes).most_common(1)[0]
-            if most_common[1] >= len(columns) / 2:
-                # most columns share this prefix
-                name = most_common[0]
-                # pluralize lightly
-                if not name.endswith("s"):
-                    name = name + "s"
-                return name.capitalize()
+        # Known patterns — semantic mapping (handles common business entities)
+        joined_lower = " ".join(c.lower() for c in columns)
+        for keywords, name in self._SEMANTIC_MAP:
+            if all(any(kw in c.lower() for c in columns) for kw in keywords):
+                return name
 
-        # Fallback: join first parts of column names
+        # Strategy 1: dominant first-token
+        if first_tokens:
+            first_counts = Counter(first_tokens)
+            top_first, count = first_counts.most_common(1)[0]
+            if count >= max(2, len(columns) // 2):
+                return self._pluralize(top_first).capitalize()
+
+        # Strategy 2: any token shared across 2+ columns (not just first)
+        token_counts = Counter(all_tokens)
+        # Drop tokens that match column names themselves to avoid `Cities` from `city, country`
+        shared = [(tok, c) for tok, c in token_counts.most_common() if c >= 2]
+        if shared:
+            top_token, _ = shared[0]
+            return self._pluralize(top_token).capitalize()
+
+        # Strategy 3: semantic guess based on which "kinds" of columns are present
+        kind = self._infer_kind(columns)
+        if kind:
+            return kind
+
+        # Strategy 4: combine first 2 distinct tokens (better than _XXX_YYY garbage)
+        seen: list[str] = []
+        for col in columns:
+            tokens = [t for t in re.split(r"[_\W]+", col.lower()) if t and t not in self._STOP_TOKENS]
+            for t in tokens:
+                if t not in seen and len(t) >= 3:
+                    seen.append(t)
+                    if len(seen) >= 2:
+                        break
+            if len(seen) >= 2:
+                break
+        if seen:
+            return "_".join(s.capitalize() for s in seen[:2])
+
+        # Last resort
         return "Entity_" + "_".join(c[:4] for c in columns[:2])
+
+    @staticmethod
+    def _pluralize(word: str) -> str:
+        if word.endswith("s"):
+            return word
+        if word.endswith("y") and not word.endswith(("ay", "ey", "oy", "uy")):
+            return word[:-1] + "ies"
+        return word + "s"
+
+    # Tokens we don\'t want as entity names — too generic
+    _STOP_TOKENS = frozenset({
+        "id", "name", "number", "no", "code", "ref", "type", "status",
+        "1", "2", "3", "first", "last", "the", "a", "an",
+    })
+
+    # Semantic mapping: when these column tokens all appear, use this entity name
+    _SEMANTIC_MAP = [
+        (("customer", "phone"), "Customers"),
+        (("contact", "phone"), "Customers"),
+        (("contact", "address"), "Customers"),
+        (("customer", "address"), "Customers"),
+        (("product", "msrp"), "Products"),
+        (("product", "price"), "Products"),
+        (("product", "code"), "Products"),
+        (("order", "date"), "Orders"),
+        (("order", "status"), "Orders"),
+        (("month", "qtr"), "Calendar"),
+        (("month", "year"), "Calendar"),
+        (("city", "country"), "Locations"),
+        (("city", "state"), "Locations"),
+        (("address", "postal"), "Addresses"),
+        (("vendor", "phone"), "Vendors"),
+        (("supplier", "phone"), "Suppliers"),
+        (("employee", "department"), "Employees"),
+        (("owner", "email"), "Owners"),
+    ]
+
+    @staticmethod
+    def _infer_kind(columns: list[str]) -> str | None:
+        """Guess entity kind from any column hint."""
+        joined = " ".join(c.lower() for c in columns)
+        if any(t in joined for t in ("customer", "client")):
+            return "Customers"
+        if any(t in joined for t in ("vendor", "supplier")):
+            return "Vendors"
+        if any(t in joined for t in ("product", "sku", "msrp")):
+            return "Products"
+        if any(t in joined for t in ("order",)):
+            return "Orders"
+        if any(t in joined for t in ("address", "postal", "zip")):
+            return "Addresses"
+        if any(t in joined for t in ("city", "country", "state", "region", "territory")):
+            return "Locations"
+        if any(t in joined for t in ("employee", "staff")):
+            return "Employees"
+        if any(t in joined for t in ("month", "year", "quarter", "qtr")):
+            return "Calendar"
+        return None
 
     # ─── Step 4: generate DDL ─────────────────────────────────────────────
 
