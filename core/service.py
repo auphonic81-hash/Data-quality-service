@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import uuid
 import zipfile
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +18,7 @@ from .catalog import DatasetCatalog
 from .consistency import RecordConsistencyChecker
 from .ingestion import DataIngestion
 from .cross_file_dedup import CrossFileDeduplicator
+from .pdf_extraction import PDFExtractor
 from .entity_resolution import EntityResolver
 from .normalizer import SchemaNormalizer
 from .profiling import DataProfiler
@@ -54,6 +55,7 @@ class DataQualityService:
         self.normalizer = SchemaNormalizer()
         self.entity_resolver = EntityResolver()
         self.cross_file_dedup = CrossFileDeduplicator()
+        self.pdf_extractor = PDFExtractor()
 
         self._cache: dict[str, dict[str, Any]] = {}
 
@@ -147,6 +149,22 @@ class DataQualityService:
         )
 
         return analysis
+
+    @staticmethod
+    def _extract_column_types_from_analysis(analysis: dict) -> dict[str, str]:
+        """Pull {column_name: detected_type} out of a stored analysis result.
+
+        The analyze step writes detected types into custom_findings.<col>.detected_type.
+        Apply Fixes needs that map to know which column gets which remediator.
+        """
+        findings = analysis.get("custom_findings") or analysis.get("quality_issues", {})
+        if not isinstance(findings, dict):
+            return {}
+        out: dict[str, str] = {}
+        for col, info in findings.items():
+            if isinstance(info, dict) and info.get("detected_type"):
+                out[col] = info["detected_type"]
+        return out
 
     def remediate(
         self, dataset_id: str, column_types: dict[str, str] | None = None
@@ -407,6 +425,24 @@ class DataQualityService:
 
         return _to_json_safe(result)
 
+    def suggest_dedup_columns(self, dataset_ids: list[str]) -> dict[str, Any]:
+        """Recommend cross-file column matches for dedup."""
+        bundles = []
+        for ds_id in dataset_ids:
+            catalog_row = self.catalog.get_dataset(ds_id)
+            if not catalog_row:
+                raise KeyError(f"Dataset {ds_id} not found")
+            bundles.append({
+                "dataset_id": ds_id,
+                "name": catalog_row["filename"],
+                "dataframe": self._get_dataset(ds_id),
+            })
+        groups = self.cross_file_dedup.suggest_column_groups(bundles)
+        # Heuristic classification by default — deterministic, fast, reliable.
+        # LLM re-analysis available via a separate endpoint if user requests it.
+        groups = self.cross_file_dedup.classify_groups(groups)
+        return _to_json_safe({"groups": groups})
+
     def find_cross_file_duplicates(
         self,
         dataset_ids: list[str],
@@ -545,6 +581,79 @@ class DataQualityService:
         return _to_json_safe({
             "datasets_affected": result_per_dataset,
             "total_archived": sum(d["archived_count"] for d in result_per_dataset),
+        })
+
+    def load_from_pdf(self, pdf_path: str | Path) -> dict[str, Any]:
+        """Extract data from a PDF and load it as a dataset.
+
+        Returns the dataset_id (loaded into the catalog like any other file)
+        plus the extraction metadata so the user can see what was found.
+        """
+        from pathlib import Path as _P
+        pdf_path = _P(pdf_path)
+
+        result = self.pdf_extractor.extract(pdf_path)
+        if result.get("error"):
+            raise ValueError(result["error"])
+
+        # Build a DataFrame from the extraction.
+        # If we have a table, merge in any key-value pairs (invoice_no, customer_id,
+        # invoice_date, total) as additional columns on every row — so the header
+        # context isn\'t lost when only the line items would be in the table.
+        kv = result.get("key_value") or {}
+        if result["tables"]:
+            df = result["tables"][0].copy()
+            for k, v in kv.items():
+                if k not in df.columns:
+                    df[k] = v
+        elif kv:
+            df = pd.DataFrame([kv])
+        else:
+            raise ValueError(
+                "PDF contained no tables and no recognizable key-value pairs. "
+                "The document may be too unstructured for automatic extraction."
+            )
+
+        # Persist the extracted data as CSV. Use a temp path while we ask the
+        # catalog to mint a dataset_id, then rename to the final path and update
+        # the catalog so its raw_csv_path points at the actual file.
+        filename = pdf_path.stem + ".csv"
+        import uuid as _uuid
+        tmp_csv = self.raw_files_dir / f"_tmp_{_uuid.uuid4().hex[:8]}.csv"
+        df.to_csv(tmp_csv, index=False)
+
+        dataset_id = self.catalog.register_dataset(
+            source=str(pdf_path),
+            filename=filename,
+            rows=int(len(df)),
+            columns=int(len(df.columns)),
+            raw_csv_path=tmp_csv,
+        )
+
+        # Rename temp file to canonical and update the catalog row to match
+        final_csv = self.raw_files_dir / f"{dataset_id}_v1.csv"
+        tmp_csv.rename(final_csv)
+
+        self.catalog.update_raw_csv_path(dataset_id, final_csv)
+
+        self._cache[dataset_id] = {
+            "dataframe": df,
+            "source":    str(pdf_path),
+            "loaded_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+
+        return _to_json_safe({
+            "dataset_id":      dataset_id,
+            "filename":        filename,
+            "rows":            int(len(df)),
+            "columns":         int(len(df.columns)),
+            "extraction": {
+                "strategy":        result["strategy"],
+                "page_count":      result["page_count"],
+                "ocr_confidence":  result["ocr_confidence"],
+                "key_value":       result["key_value"],
+                "warnings":        result["warnings"],
+            },
         })
 
     def _get_dataset(self, dataset_id: str) -> pd.DataFrame:

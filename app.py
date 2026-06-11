@@ -80,6 +80,13 @@ def upload_file():
     file.save(save_path)
 
     try:
+        ext = Path(filename).suffix.lower()
+        if ext == ".pdf":
+            try:
+                result = service.load_from_pdf(save_path)
+                return jsonify(result)
+            except ValueError as exc:
+                return jsonify({"error": str(exc)}), 400
         dataset_id, df = service.load_from_file(save_path)
         return jsonify({
             "dataset_id": dataset_id,
@@ -286,9 +293,21 @@ def find_duplicates_across_files():
     payload = request.get_json(silent=True) or {}
     dataset_ids = payload.get("dataset_ids") or []
     id_columns = payload.get("id_columns")
+    detect_only = bool(payload.get("detect_only"))
     if not isinstance(dataset_ids, list) or len(dataset_ids) < 2:
         return jsonify({"error": "dataset_ids must be a list of at least 2 ids"}), 400
     try:
+        if detect_only:
+            # Return only the per-dataset detected ID columns, no dedup yet.
+            # Used by the dashboard\'s two-step modal: step 1 picks files,
+            # step 2 picks which column to match on.
+            result = service.find_cross_file_duplicates(dataset_ids, id_columns=["__never_match__"])
+            return jsonify({
+                "datasets": result.get("datasets", []),
+                "summary": {"total_clusters": 0, "total_duplicate_rows": 0, "rows_that_would_be_archived": 0},
+                "duplicate_clusters": [],
+                "id_columns_used": [],
+            })
         return jsonify(service.find_cross_file_duplicates(dataset_ids, id_columns))
     except KeyError as exc:
         return jsonify({"error": str(exc)}), 404
@@ -338,6 +357,25 @@ def list_archived_rows(dataset_id: str):
             "count": len(rows),
             "archived_rows": rows,
         })
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+
+
+@app.route("/api/suggest-dedup-columns", methods=["POST"])
+def suggest_dedup_columns():
+    """Recommend cross-file column matches for cross-file dedup.
+
+    Body: {"dataset_ids": [str, str, ...]}
+    Returns groups of columns that hold the same business concept across files.
+    """
+    payload = request.get_json(silent=True) or {}
+    dataset_ids = payload.get("dataset_ids") or []
+    if not isinstance(dataset_ids, list) or len(dataset_ids) < 2:
+        return jsonify({"error": "dataset_ids must be a list of at least 2 ids"}), 400
+    try:
+        return jsonify(service.suggest_dedup_columns(dataset_ids))
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
 

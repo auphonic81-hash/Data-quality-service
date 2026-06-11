@@ -208,8 +208,8 @@
           <div class="upload-zone" id="upload-zone">
             <p><strong>Drop a file here</strong></p>
             <p>or click to browse</p>
-            <p style="font-size: 11px; margin-top: 12px;">CSV, Excel, JSON, Parquet, TSV</p>
-            <input type="file" id="file-input" accept=".csv,.xlsx,.xls,.json,.parquet,.tsv">
+            <p style="font-size: 11px; margin-top: 12px;">CSV, Excel, JSON, Parquet, TSV, PDF, PDF</p>
+            <input type="file" id="file-input" accept=".csv,.xlsx,.xls,.json,.parquet,.tsv,.pdf">
           </div>
         </div>
 
@@ -625,6 +625,9 @@
         `;
         list.appendChild(row);
       }
+      // Always reset to step 1 when reopening
+      document.getElementById('cfd-step-files').style.display = 'block';
+      document.getElementById('cfd-step-columns').style.display = 'none';
       document.getElementById('cfd-modal').classList.add('open');
     }
 
@@ -632,7 +635,10 @@
       document.getElementById('cfd-modal').classList.remove('open');
     }
 
-    async function runCrossFileDedup() {
+    let _cfdSelectedDatasets = [];
+    let _cfdDetectedColumns = [];
+
+    async function cfdScanForColumns() {
       const checked = Array.from(
         document.querySelectorAll('#cfd-dataset-list input[type=checkbox]:checked')
       ).map(el => el.value);
@@ -640,13 +646,105 @@
         toast('Pick at least 2 files', 'error');
         return;
       }
+      _cfdSelectedDatasets = checked;
+      try {
+        const result = await api('/api/suggest-dedup-columns', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ dataset_ids: checked }),
+        });
+        cfdRenderColumnPicker(result.groups || []);
+        document.getElementById('cfd-step-files').style.display = 'none';
+        document.getElementById('cfd-step-columns').style.display = 'block';
+      } catch (e) {
+        toast(e.message, 'error');
+      }
+    }
+
+    let _cfdGroups = [];
+
+    function cfdRenderColumnPicker(groups) {
+      _cfdGroups = groups;
+      const list = document.getElementById('cfd-column-list');
+      list.innerHTML = '';
+      if (!groups.length) {
+        list.innerHTML = `<div style="color: var(--muted); padding: 12px;">No identifier columns appear in 2+ files. These files don\'t share a record key.</div>`;
+        return;
+      }
+
+      for (let i = 0; i < groups.length; i++) {
+        const g = groups[i];
+        const cls = g.classification;
+        const isDedup = cls === 'primary_key_match';
+        const isFK    = cls === 'foreign_key_link';
+
+        let badge, borderColor;
+        if (isDedup) {
+          badge = '<span style="font-size: 10px; font-weight: 700; padding: 3px 10px; background: rgba(56,212,168,0.18); color: var(--success); border-radius: 10px;">★ DEDUP MATCH</span>';
+          borderColor = 'var(--success)';
+        } else if (isFK) {
+          badge = '<span style="font-size: 10px; font-weight: 700; padding: 3px 10px; background: rgba(248,113,113,0.18); color: var(--danger); border-radius: 10px;">✗ FOREIGN KEY</span>';
+          borderColor = 'var(--danger)';
+        } else {
+          badge = '<span style="font-size: 10px; font-weight: 700; padding: 3px 10px; background: rgba(245,158,11,0.18); color: var(--warning); border-radius: 10px;">? UNCERTAIN</span>';
+          borderColor = 'var(--warning)';
+        }
+
+        const membersHtml = g.members.map(m => `
+          <div style="font-size: 12px; margin-top: 4px;">
+            <span style="color: var(--accent);"><strong>${escapeHtml(m.dataset_name)}</strong></span>
+            →  <code>${escapeHtml(m.column)}</code>
+            <span style="color: var(--muted); font-size: 11px; margin-left: 8px;">samples: ${m.sample_values.slice(0, 3).map(s => `<code>${escapeHtml(s)}</code>`).join(', ')}</span>
+          </div>
+        `).join('');
+
+        const row = document.createElement('label');
+        row.style.cssText = `display: block; padding: 12px; margin-bottom: 10px; border: 1px solid var(--border); border-left: 3px solid ${borderColor}; border-radius: 6px; cursor: pointer; background: rgba(255,255,255,0.02);`;
+        row.innerHTML = `
+          <div style="display: flex; align-items: flex-start; gap: 10px;">
+            <input type="checkbox" value="${i}" ${isDedup ? 'checked' : ''} style="margin: 4px 0 0 0;">
+            <div style="flex: 1; min-width: 0;">
+              <div style="display: flex; align-items: center; gap: 10px;">
+                ${badge}
+                <span style="color: var(--muted); font-size: 11px;">${g.value_overlap_pct}% value overlap</span>
+              </div>
+              <div style="margin-top: 8px;">${membersHtml}</div>
+              <div style="font-size: 11px; color: var(--muted); margin-top: 8px; font-style: italic;">
+                ${escapeHtml(g.reasoning)}
+              </div>
+            </div>
+          </div>
+        `;
+        list.appendChild(row);
+      }
+    }
+
+    function cfdBackToFiles() {
+      document.getElementById('cfd-step-columns').style.display = 'none';
+      document.getElementById('cfd-step-files').style.display = 'block';
+    }
+
+    async function cfdRunWithSelectedColumns() {
+      const checkedIdx = Array.from(
+        document.querySelectorAll('#cfd-column-list input[type=checkbox]:checked')
+      ).map(el => parseInt(el.value, 10));
+      if (!checkedIdx.length) {
+        toast('Pick at least 1 column group', 'error'); return;
+      }
+      // Flatten the selected groups into a column-name list to send to the backend.
+      // The backend\'s value-based matcher will figure out the cross-file matching.
+      const chosenCols = new Set();
+      for (const i of checkedIdx) {
+        for (const m of _cfdGroups[i].members) {
+          chosenCols.add(m.column);
+        }
+      }
       closeCrossFileDedupDialog();
       const out = document.getElementById('analysis-output');
-      if (out) out.innerHTML = '<div class="loader"></div> Scanning for shared identifiers across files...';
+      if (out) out.innerHTML = '<div class="loader"></div> Finding duplicates...';
       try {
         const result = await api('/api/find-duplicates-across-files', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ dataset_ids: checked }),
+          body: JSON.stringify({ dataset_ids: _cfdSelectedDatasets, id_columns: Array.from(chosenCols) }),
         });
         renderCrossFileDedup(result);
         toast(`Found ${result.summary.total_clusters} duplicate clusters`, 'success');
@@ -1094,8 +1192,8 @@
         uploadZone.innerHTML = `
           <p><strong>Drop a file here</strong></p>
           <p>or click to browse</p>
-          <p style="font-size: 11px; margin-top: 12px;">CSV, Excel, JSON, Parquet, TSV</p>
-          <input type="file" id="file-input" accept=".csv,.xlsx,.xls,.json,.parquet,.tsv">
+          <p style="font-size: 11px; margin-top: 12px;">CSV, Excel, JSON, Parquet, TSV, PDF, PDF</p>
+          <input type="file" id="file-input" accept=".csv,.xlsx,.xls,.json,.parquet,.tsv,.pdf">
         `;
         // Reattach listener
         document.getElementById('file-input').addEventListener('change', e => {
@@ -1142,14 +1240,29 @@
   <div class="modal-backdrop" id="cfd-modal">
     <div class="modal">
       <h2>Find Duplicates Across Files</h2>
-      <p style="color: var(--muted); font-size: 13px; margin-bottom: 12px;">
-        Select 2 or more files. The tool will find rows that share an identifier
-        (bill number, invoice ID, SKU, etc.) across them and recommend which copy to keep.
-      </p>
-      <div id="cfd-dataset-list" style="max-height: 240px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; padding: 8px;"></div>
-      <div class="modal-actions">
-        <button class="btn btn-secondary" onclick="closeCrossFileDedupDialog()">Cancel</button>
-        <button class="btn btn-success" onclick="runCrossFileDedup()">Find Duplicates</button>
+      <div id="cfd-step-files">
+        <p style="color: var(--muted); font-size: 13px; margin-bottom: 12px;">
+          Step 1 — pick 2 or more files to scan.
+        </p>
+        <div id="cfd-dataset-list" style="max-height: 240px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; padding: 8px;"></div>
+        <div class="modal-actions">
+          <button class="btn btn-secondary" onclick="closeCrossFileDedupDialog()">Cancel</button>
+          <button class="btn btn-success" onclick="cfdScanForColumns()">Next — pick match column</button>
+        </div>
+      </div>
+      <div id="cfd-step-columns" style="display: none;">
+        <p style="color: var(--muted); font-size: 13px; margin-bottom: 8px;">
+          Step 2 — pick which column identifies a unique record.
+        </p>
+        <div class="review-banner" style="border-left-color: var(--warning); margin-bottom: 12px; font-size: 12px;">
+          ⚠ Don\'t use foreign keys like <code>customer_id</code>. They link tables, they don\'t identify duplicates.
+          Use the record\'s own primary key — invoice number, bill ID, SKU, etc.
+        </div>
+        <div id="cfd-column-list" style="max-height: 280px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; padding: 8px;"></div>
+        <div class="modal-actions">
+          <button class="btn btn-secondary" onclick="cfdBackToFiles()">Back</button>
+          <button class="btn btn-success" onclick="cfdRunWithSelectedColumns()">Find Duplicates</button>
+        </div>
       </div>
     </div>
   </div>

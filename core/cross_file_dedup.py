@@ -126,9 +126,14 @@ class CrossFileDeduplicator:
             has_format = "format" in signals
             has_uniqueness = "uniqueness" in signals
 
+            # Short datasets (e.g. single-row PDF extractions) can\'t satisfy
+            # the uniqueness check (need 2+ distinct values). If the column has
+            # a strong name signal AND a structured value, accept it anyway.
+            is_short = n_rows < 5
             qualifies = (
                 (has_name and (has_uniqueness or has_format))
                 or has_format
+                or (is_short and has_name and self._has_id_like_value(df[col]))
             )
             if not qualifies:
                 continue
@@ -249,19 +254,98 @@ class CrossFileDeduplicator:
         # consistent length. Pure-letter strings are usually not IDs.
         return has_digit and (has_letter or 4 <= len(compact) <= 20)
 
+
+    def _has_id_like_value(self, series: pd.Series) -> bool:
+        """Check if any non-null value looks like a structured ID code.
+
+        Used for short datasets (e.g. single-row PDFs) where the uniqueness
+        signal can\'t fire but the value clearly looks like an identifier.
+        """
+        for v in series.dropna().astype(str).head(10):
+            if self._looks_like_id_format(v.strip()):
+                return True
+        return False
+
     # ─── Column matching across datasets ──────────────────────────────────
 
     @staticmethod
     def _find_shared_id_columns(
         dataset_info: list[dict[str, Any]],
     ) -> dict[str, dict[str, str]]:
-        """Find detected ID columns whose lowercase name appears in 2+ datasets."""
+        """Find ID columns that can be matched across datasets.
+
+        Two-pass strategy:
+          Pass 1: Match by lowercase column NAME (fast, handles the easy case)
+          Pass 2: For datasets that didn\'t match by name, try matching by VALUE OVERLAP —
+                  i.e. "this column in file A and that column in file B share at least 10%
+                  of their actual values". Handles Vendor_Code vs vendor_id renames.
+        """
+        # ── Pass 1: by lowercase name (existing behavior)
         by_canonical: dict[str, dict[str, str]] = defaultdict(dict)
         for d in dataset_info:
             for cand in d["detected_id_columns"]:
                 canonical = cand["column"].lower().strip()
                 by_canonical[canonical][d["dataset_id"]] = cand["column"]
-        return {c: m for c, m in by_canonical.items() if len(m) >= 2}
+
+        # Datasets already matched in Pass 1
+        matched_by_name = {c: m for c, m in by_canonical.items() if len(m) >= 2}
+        if matched_by_name:
+            return matched_by_name
+
+        # ── Pass 2: by value overlap
+        # Collect every detected ID column with its actual values
+        cols_with_values: list[dict[str, Any]] = []
+        for d in dataset_info:
+            df = d["dataframe"]
+            for cand in d["detected_id_columns"]:
+                values = set(df[cand["column"]].dropna().astype(str).str.strip().str.lower())
+                if not values:
+                    continue
+                cols_with_values.append({
+                    "dataset_id":  d["dataset_id"],
+                    "column":      cand["column"],
+                    "values":      values,
+                })
+
+        # For every pair of (different-dataset) columns, compute Jaccard overlap.
+        # Group columns into shared clusters when overlap >= 10% of smaller set.
+        OVERLAP_THRESHOLD = 0.10
+        clusters: list[dict[str, dict[str, str]]] = []
+        used_keys: set[tuple[str, str]] = set()
+
+        for i in range(len(cols_with_values)):
+            ci = cols_with_values[i]
+            key_i = (ci["dataset_id"], ci["column"])
+            if key_i in used_keys:
+                continue
+            current_cluster: dict[str, str] = {ci["dataset_id"]: ci["column"]}
+            current_values = set(ci["values"])
+
+            for j in range(i + 1, len(cols_with_values)):
+                cj = cols_with_values[j]
+                if cj["dataset_id"] in current_cluster:
+                    continue  # one column per dataset
+                shared = len(current_values & cj["values"])
+                smaller = min(len(current_values), len(cj["values"]))
+                if smaller > 0 and shared / smaller >= OVERLAP_THRESHOLD:
+                    current_cluster[cj["dataset_id"]] = cj["column"]
+                    used_keys.add((cj["dataset_id"], cj["column"]))
+
+            if len(current_cluster) >= 2:
+                clusters.append(current_cluster)
+                used_keys.add(key_i)
+
+        # Build the canonical name → per_dataset_col map
+        result: dict[str, dict[str, str]] = {}
+        for idx, cluster in enumerate(clusters):
+            # Pick a canonical name (shortest column name from the cluster)
+            canonical = min(cluster.values(), key=len).lower().strip()
+            # Avoid collisions if Pass 1 already used this name
+            while canonical in result:
+                canonical = f"{canonical}_{idx}"
+            result[canonical] = cluster
+
+        return result
 
     @staticmethod
     def _resolve_user_chosen_columns(
@@ -336,6 +420,242 @@ class CrossFileDeduplicator:
         return {"dataset_id": best["dataset_id"], "row_index": best["row_index"]}
 
     # ─── Helpers ──────────────────────────────────────────────────────────
+
+
+    def suggest_column_groups(
+        self,
+        datasets: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Recommend which columns across files hold the same business concept.
+
+        Strategy:
+          1. Compute value overlap between every pair of detected ID columns
+             across different datasets (Jaccard on the value sets).
+          2. Group columns into clusters where any pair overlaps >= 10%.
+          3. Return each cluster with its evidence (overlap %, sample values).
+
+        The caller can then ask an LLM to verify ambiguous clusters.
+        """
+        # Collect detected ID columns with their value sets
+        cols: list[dict[str, Any]] = []
+        for d in datasets:
+            df = d["dataframe"]
+            for cand in self.detect_id_columns(df):
+                values = set(df[cand["column"]].dropna().astype(str).str.strip().str.lower())
+                if not values:
+                    continue
+                cols.append({
+                    "dataset_id":  d["dataset_id"],
+                    "dataset_name": d.get("name", d["dataset_id"]),
+                    "column":      cand["column"],
+                    "confidence":  cand["confidence"],
+                    "sample_values": cand["sample_values"],
+                    "uniqueness":  cand["uniqueness"],
+                    "values":      values,
+                })
+
+        # Pairwise overlap → union-find clustering
+        OVERLAP_THRESHOLD = 0.10
+        parent = list(range(len(cols)))
+        def find(x):
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+        def union(a, b):
+            ra, rb = find(a), find(b)
+            if ra != rb:
+                parent[ra] = rb
+
+        pair_overlaps: dict[tuple[int, int], float] = {}
+        for i in range(len(cols)):
+            for j in range(i + 1, len(cols)):
+                if cols[i]["dataset_id"] == cols[j]["dataset_id"]:
+                    continue
+                shared = len(cols[i]["values"] & cols[j]["values"])
+                smaller = min(len(cols[i]["values"]), len(cols[j]["values"]))
+                if smaller == 0:
+                    continue
+                overlap = shared / smaller
+                pair_overlaps[(i, j)] = overlap
+                if overlap >= OVERLAP_THRESHOLD:
+                    union(i, j)
+
+        # Build groups
+        groups: dict[int, list[int]] = {}
+        for i in range(len(cols)):
+            groups.setdefault(find(i), []).append(i)
+
+        # Format groups for the UI
+        result: list[dict[str, Any]] = []
+        for member_indices in groups.values():
+            if len(member_indices) < 2:
+                continue
+            # Compute the best overlap inside this group as evidence
+            best_overlap = 0.0
+            for i in member_indices:
+                for j in member_indices:
+                    if i < j:
+                        best_overlap = max(best_overlap, pair_overlaps.get((i, j), 0))
+            members = []
+            for idx in member_indices:
+                c = cols[idx]
+                members.append({
+                    "dataset_id":  c["dataset_id"],
+                    "dataset_name": c["dataset_name"],
+                    "column":      c["column"],
+                    "confidence":  c["confidence"],
+                    "sample_values": c["sample_values"],
+                    "uniqueness":  c["uniqueness"],
+                })
+            result.append({
+                "group_id":     f"g{len(result)}",
+                "members":      members,
+                "value_overlap_pct": round(best_overlap * 100, 1),
+                "auto_recommended": best_overlap >= 0.30,
+            })
+
+        # Sort: auto-recommended groups first, then by overlap %
+        result.sort(key=lambda g: (not g["auto_recommended"], -g["value_overlap_pct"]))
+        return result
+
+
+    def classify_groups(
+        self,
+        groups: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Classify each group as PK match / FK link / uncertain using heuristics.
+
+        Rules:
+          - PK-like name (*_no, *_number, *_ref, invoice_*, bill_*, order_*) +
+            overlap between 5% and 60%  →  primary_key_match
+          - FK-like name (customer_id, vendor_id, supplier_id, product_id) +
+            overlap > 60%  →  foreign_key_link
+          - Otherwise → uncertain (user picks manually)
+        """
+        PK_HINTS = ("_no", "_number", "_ref", "invoice", "bill", "order", "receipt", "transaction", "txn")
+        FK_HINTS = ("customer", "client", "vendor", "supplier", "product", "user", "account")
+
+        for group in groups:
+            overlap_pct = group["value_overlap_pct"]
+            # Take the column-name signal from any member (they all map to the same concept)
+            sample_col = group["members"][0]["column"].lower()
+
+            is_pk_name = any(h in sample_col for h in PK_HINTS)
+            is_fk_name = any(h in sample_col for h in FK_HINTS) and sample_col.endswith(("_id", "id"))
+
+            if is_pk_name and 5 <= overlap_pct <= 60:
+                cls = "primary_key_match"
+                reason = f"Column name suggests a record key ({sample_col}) and {overlap_pct}% overlap is consistent with partial duplication."
+            elif is_fk_name and overlap_pct > 60:
+                cls = "foreign_key_link"
+                reason = f"Column name looks like a foreign key ({sample_col}) and {overlap_pct}% overlap is consistent with shared references — not duplicates."
+            elif overlap_pct > 90:
+                cls = "foreign_key_link"
+                reason = f"{overlap_pct}% value overlap is too high for a primary key — usually indicates a shared reference."
+            elif overlap_pct < 5:
+                cls = "uncertain"
+                reason = f"Only {overlap_pct}% overlap — these columns may not represent the same concept."
+            else:
+                cls = "uncertain"
+                reason = "Cannot determine automatically — please decide based on the sample values."
+
+            group["classification"] = cls
+            group["reasoning"] = reason
+            group["dedup_recommended"] = (cls == "primary_key_match")
+
+        order = {"primary_key_match": 0, "uncertain": 1, "foreign_key_link": 2}
+        groups.sort(key=lambda g: order.get(g.get("classification", "uncertain"), 1))
+        return groups
+
+    def classify_groups_with_llm(
+        self,
+        groups: list[dict[str, Any]],
+        ollama_url: str = "http://localhost:11434/api/generate",
+        model: str = "qwen3.5:latest",
+    ) -> list[dict[str, Any]]:
+        """Ask the local LLM to classify each group as PK match vs FK link.
+
+        Adds three fields to each group:
+          - classification: "primary_key_match" | "foreign_key_link" | "uncertain"
+          - reasoning: short explanation
+          - dedup_recommended: bool (true iff PK match)
+
+        Falls back to "uncertain" with a clear note if the LLM is unreachable.
+        """
+        import json as _json
+        import requests
+
+        for group in groups:
+            # Strip the heavy "values" set before sending to LLM
+            payload_members = [
+                {
+                    "dataset": m["dataset_name"],
+                    "column":  m["column"],
+                    "samples": m["sample_values"][:5],
+                    "uniqueness": m["uniqueness"],
+                }
+                for m in group["members"]
+            ]
+            value_overlap = group["value_overlap_pct"]
+
+            prompt = f"""You are a database expert classifying column relationships between files.
+
+Given these matching columns across files:
+{_json.dumps(payload_members, indent=2)}
+
+Value overlap across files: {value_overlap}% of values appear in both.
+
+Classify this relationship as exactly ONE of:
+- "primary_key_match": Same record appearing in both files (true duplicate). Column holds the record\'s own unique ID. Example: same invoice number in orders.csv and invoices.csv → these rows represent the same bill.
+- "foreign_key_link": Column references a record in another table. High overlap is expected and normal — NOT a sign of duplication. Example: customer_id in orders.csv and invoices.csv → same customer placing orders AND being invoiced is not a duplicate.
+- "uncertain": Cannot determine from the signal.
+
+Key clues:
+- If overlap is near 100% and the column looks like *_id pointing to entities (customers, products, vendors), it\'s usually a foreign key.
+- If overlap is partial (10-30%) and the column looks like the file\'s own unique record key (bill_no, invoice_ref, order_id where each file is about orders/invoices), it\'s a primary key match.
+- Look at the column name semantics and the sample values.
+
+Return ONLY valid JSON, no other text:
+{{"classification": "...", "reasoning": "one short sentence"}}
+"""
+
+            try:
+                response = requests.post(
+                    ollama_url,
+                    json={"model": model, "prompt": prompt, "stream": False, "format": "json"},
+                    timeout=60,
+                )
+                response.raise_for_status()
+                body = response.json()
+                # Reasoning models (qwen 3.5) put the answer in "thinking" when
+                # the model didn\'t produce a separate "response" field.
+                raw = body.get("response") or body.get("thinking") or "{}"
+                if isinstance(raw, str):
+                    raw = raw.strip()
+                    # Strip markdown code fences if present
+                    if raw.startswith("```"):
+                        raw = raw.strip("`").strip()
+                        if raw.lower().startswith("json"):
+                            raw = raw[4:].strip()
+                    parsed = _json.loads(raw)
+                else:
+                    parsed = raw
+                cls = parsed.get("classification", "uncertain")
+                if cls not in ("primary_key_match", "foreign_key_link", "uncertain"):
+                    cls = "uncertain"
+                group["classification"] = cls
+                group["reasoning"] = parsed.get("reasoning", "")
+                group["dedup_recommended"] = (cls == "primary_key_match")
+            except Exception as exc:
+                group["classification"] = "uncertain"
+                group["reasoning"] = f"LLM unavailable ({type(exc).__name__}). Pick manually."
+                group["dedup_recommended"] = False
+
+        # Re-sort: PK matches first, uncertain next, FK last
+        order = {"primary_key_match": 0, "uncertain": 1, "foreign_key_link": 2}
+        groups.sort(key=lambda g: order.get(g.get("classification", "uncertain"), 1))
+        return groups
 
     @staticmethod
     def _empty_result(reason: str) -> dict[str, Any]:

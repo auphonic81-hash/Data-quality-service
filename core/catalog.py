@@ -289,6 +289,37 @@ class DatasetCatalog:
             return [dict(r) for r in rows]
 
 
+
+
+    def update_raw_csv_path(self, dataset_id: str, new_path: Path) -> None:
+        """Update where a dataset\'s CSV lives on disk (catalog + v1 version row)."""
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE datasets SET raw_csv_path=? WHERE dataset_id=?",
+                (str(new_path), dataset_id),
+            )
+            conn.execute(
+                "UPDATE dataset_versions SET csv_path=? "
+                "WHERE dataset_id=? AND version_number=1",
+                (str(new_path), dataset_id),
+            )
+
+    def latest_analysis(self, dataset_id: str) -> dict[str, Any] | None:
+        """Return the most recent analysis payload for a dataset, or None."""
+        with self._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT payload_json FROM analyses WHERE dataset_id = ? "
+                "ORDER BY analyzed_at DESC LIMIT 1",
+                (dataset_id,),
+            ).fetchone()
+            if not row:
+                return None
+            try:
+                return json.loads(row["payload_json"])
+            except Exception:
+                return None
+
     # ─── Archived rows ────────────────────────────────────────────────────
 
     def archive_rows(

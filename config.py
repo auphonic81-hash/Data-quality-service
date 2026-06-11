@@ -22,7 +22,7 @@ HOST = os.getenv("HOST", "0.0.0.0")
 DEBUG = os.getenv("DEBUG", "True").lower() == "true"
 
 MAX_UPLOAD_SIZE_MB = 100
-SUPPORTED_FORMATS = {".csv", ".xlsx", ".xls", ".json", ".parquet", ".tsv"}
+SUPPORTED_FORMATS = {".csv", ".xlsx", ".xls", ".json", ".parquet", ".tsv", ".pdf"}
 
 PROFILE_MINIMAL = True
 PROFILE_SAMPLE_SIZE = 10000
