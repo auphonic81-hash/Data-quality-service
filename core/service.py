@@ -19,6 +19,7 @@ from .consistency import RecordConsistencyChecker
 from .ingestion import DataIngestion
 from .cross_file_dedup import CrossFileDeduplicator
 from .pdf_extraction import PDFExtractor
+from .master_repository import MasterRepository
 from .entity_resolution import EntityResolver
 from .normalizer import SchemaNormalizer
 from .profiling import DataProfiler
@@ -56,6 +57,7 @@ class DataQualityService:
         self.entity_resolver = EntityResolver()
         self.cross_file_dedup = CrossFileDeduplicator()
         self.pdf_extractor = PDFExtractor()
+        self.master_repo = MasterRepository(self.catalog.db_path)
 
         self._cache: dict[str, dict[str, Any]] = {}
 
@@ -655,6 +657,30 @@ class DataQualityService:
                 "warnings":        result["warnings"],
             },
         })
+
+    def ingest_to_master(self, dataset_id: str, target_entity: str) -> dict[str, Any]:
+        """Push a loaded dataset into a master entity table.
+
+        Routes through the existing pipeline: data is already standardized
+        when this runs (Apply Fixes is auto-called on upload elsewhere).
+        """
+        df = self._get_dataset(dataset_id)
+        return _to_json_safe(self.master_repo.ingest(df, dataset_id, target_entity))
+
+    def get_platform_summary(self) -> dict[str, Any]:
+        """Master repository summary for the platform landing view."""
+        return _to_json_safe(self.master_repo.get_master_summary())
+
+    def list_master(self, entity: str, limit: int = 50) -> dict[str, Any]:
+        """List records in a master table."""
+        return _to_json_safe({
+            "entity": entity,
+            "rows":   self.master_repo.list_master_rows(entity, limit=limit),
+        })
+
+    def get_ingestion_log(self, limit: int = 50) -> dict[str, Any]:
+        """Recent ingestion activity (lineage view)."""
+        return _to_json_safe({"log": self.master_repo.get_ingestion_log(limit=limit)})
 
     def _get_dataset(self, dataset_id: str) -> pd.DataFrame:
         """Get a dataset's DataFrame. Loads from disk on cache miss."""

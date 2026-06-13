@@ -1,1270 +1,1023 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Data Quality Service</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Unified Data Platform</title>
   <style>
     :root {
-      --bg: #0a0e1a;
-      --panel: #131826;
-      --border: #1f2738;
-      --accent: #4f9cf9;
-      --accent-2: #38d4a8;
-      --text: #e6ecf3;
-      --muted: #7d8ba1;
-      --danger: #ef5b5b;
-      --warning: #f5a623;
-      --success: #38d4a8;
+      --bg:        #f8fafc;
+      --surface:   #ffffff;
+      --surface-2: #f1f5f9;
+      --border:    #e2e8f0;
+      --border-strong: #cbd5e1;
+      --text:      #0f172a;
+      --text-muted:#64748b;
+      --text-soft: #94a3b8;
+      --accent:    #0ea5e9;
+      --accent-strong: #0284c7;
+      --accent-soft: #e0f2fe;
+      --success:   #10b981;
+      --success-soft: #d1fae5;
+      --warning:   #f59e0b;
+      --warning-soft: #fef3c7;
+      --danger:    #ef4444;
+      --danger-soft: #fee2e2;
+      --radius:    8px;
+      --radius-lg: 12px;
+      --shadow-sm: 0 1px 2px rgba(15,23,42,0.04), 0 1px 3px rgba(15,23,42,0.06);
+      --shadow-md: 0 4px 8px rgba(15,23,42,0.05), 0 2px 4px rgba(15,23,42,0.04);
     }
     * { box-sizing: border-box; }
-    body {
+    html, body {
       margin: 0; padding: 0;
-      background: var(--bg); color: var(--text);
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
-      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
+      font-size: 14px;
+      line-height: 1.5;
     }
-    .container { max-width: 1280px; margin: 0 auto; padding: 32px 24px; }
-    .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 32px; }
-    .header h1 { margin: 0; font-size: 28px; font-weight: 700; }
-    .header h1 span { color: var(--accent); }
-    .header .subtitle { color: var(--muted); font-size: 14px; margin-top: 4px; }
-    .grid { display: grid; grid-template-columns: 360px 1fr; gap: 24px; }
-    .panel {
-      background: var(--panel); border: 1px solid var(--border);
-      border-radius: 12px; padding: 20px;
-    }
-    .panel h2 {
-      margin: 0 0 16px; font-size: 16px; font-weight: 600;
-      color: var(--text); display: flex; align-items: center; gap: 8px;
-    }
-    .panel h2::before {
-      content: ""; display: inline-block; width: 4px; height: 16px;
-      background: var(--accent); border-radius: 2px;
-    }
-    .upload-zone {
-      border: 2px dashed var(--border); border-radius: 8px;
-      padding: 32px; text-align: center; cursor: pointer;
-      transition: all 0.2s;
-    }
-    .upload-zone:hover { border-color: var(--accent); background: rgba(79, 156, 249, 0.05); }
-    .upload-zone.drag { border-color: var(--accent-2); background: rgba(56, 212, 168, 0.1); }
-    .upload-zone p { margin: 0 0 8px; color: var(--muted); }
-    .upload-zone strong { color: var(--text); }
-    .upload-zone input { display: none; }
-    .btn {
-      background: var(--accent); color: white; border: none;
-      padding: 10px 20px; border-radius: 6px; cursor: pointer;
-      font-weight: 600; font-size: 14px; transition: all 0.2s;
-    }
-    .btn:hover { background: #3a87e0; }
-    .btn:disabled { background: var(--border); cursor: not-allowed; opacity: 0.6; }
-    .btn-secondary { background: var(--border); color: var(--text); }
-    .btn-secondary:hover { background: #2a3346; }
-    .btn-success { background: var(--accent-2); }
-    .dataset-list { display: flex; flex-direction: column; gap: 8px; max-height: 320px; overflow-y: auto; }
-    .dataset-item {
-      padding: 12px; border: 1px solid var(--border); border-radius: 8px;
-      cursor: pointer; transition: all 0.2s;
-    }
-    .dataset-item:hover { border-color: var(--accent); }
-    .dataset-item.active { border-color: var(--accent); background: rgba(79, 156, 249, 0.08); }
-    .dataset-item .name { font-weight: 600; font-size: 13px; }
-    .dataset-item .meta { color: var(--muted); font-size: 12px; margin-top: 4px; }
-    .actions { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
-    .results { min-height: 400px; }
-    .empty-state { text-align: center; padding: 64px 24px; color: var(--muted); }
-    .empty-state svg { margin-bottom: 16px; opacity: 0.5; }
-    .stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
-    .stat {
-      background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border);
-      border-radius: 8px; padding: 14px;
-    }
-    .stat .label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
-    .stat .value { font-size: 22px; font-weight: 700; margin-top: 4px; }
-    .stat.warn .value { color: var(--warning); }
-    .stat.danger .value { color: var(--danger); }
-    .stat.success .value { color: var(--success); }
-    .section { margin-top: 24px; }
-    .section h3 { font-size: 14px; font-weight: 600; margin: 0 0 12px; color: var(--text); }
-    .issue {
-      background: rgba(255, 255, 255, 0.02); border-left: 3px solid var(--warning);
-      padding: 10px 14px; border-radius: 4px; margin-bottom: 8px; font-size: 13px;
-    }
-    .issue.danger { border-left-color: var(--danger); }
-    .issue.info { border-left-color: var(--accent); }
-    pre {
-      background: rgba(0, 0, 0, 0.3); padding: 12px; border-radius: 6px;
-      overflow-x: auto; font-size: 12px; color: #b8c5d6;
-    }
-    .loader {
-      display: inline-block; width: 16px; height: 16px;
-      border: 2px solid var(--border); border-top-color: var(--accent);
-      border-radius: 50%; animation: spin 0.8s linear infinite;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    .toast {
-      position: fixed; bottom: 24px; right: 24px;
-      background: var(--panel); border: 1px solid var(--border);
-      padding: 14px 20px; border-radius: 8px;
-      box-shadow: 0 8px 24px rgba(0,0,0,0.4);
-      animation: slideIn 0.3s;
-    }
-    .toast.success { border-color: var(--success); }
-    .toast.error { border-color: var(--danger); }
-    @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } }
+    code { font-family: "SF Mono", Monaco, Consolas, monospace; background: var(--surface-2); padding: 1px 6px; border-radius: 4px; font-size: 12px; }
 
-    .diff-table {
-      width: 100%; border-collapse: collapse; font-size: 12px;
-      margin-top: 12px;
+    /* ─── TOP NAVIGATION ─── */
+    .topbar {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 0 24px;
+      height: 56px;
+      display: flex;
+      align-items: center;
+      box-shadow: var(--shadow-sm);
+      position: sticky; top: 0; z-index: 100;
     }
-    .diff-table th, .diff-table td {
-      padding: 8px 10px; text-align: left; border: 1px solid var(--border);
-      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-      min-width: 140px; max-width: 240px;
+    .topbar .logo {
+      font-size: 17px; font-weight: 700;
+      color: var(--text);
+      display: flex; align-items: center; gap: 8px;
+      margin-right: 32px;
     }
-    .diff-table th {
-      background: rgba(255,255,255,0.04); font-weight: 600; color: var(--muted);
-      text-transform: uppercase; font-size: 10px; letter-spacing: 0.5px;
+    .topbar .logo-mark {
+      width: 28px; height: 28px;
+      background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+      border-radius: 6px;
+      display: inline-flex; align-items: center; justify-content: center;
+      color: white; font-size: 16px; font-weight: 700;
     }
-    .diff-table .col-header {
-      background: rgba(79,156,249,0.08); color: var(--accent); font-weight: 700;
+    .topbar nav {
+      display: flex; gap: 4px;
+      flex: 1;
     }
-    .diff-table td.changed {
-      background: rgba(56,212,168,0.08); color: var(--success);
-      font-weight: 500;
+    .topbar nav button {
+      background: none; border: none; cursor: pointer;
+      padding: 8px 14px; font-size: 13px; font-weight: 500;
+      color: var(--text-muted);
+      border-radius: 6px;
+      transition: all 0.15s;
     }
-    .diff-table td.original {
-      background: rgba(239,91,91,0.06); color: #f0a5a5;
-      text-decoration: line-through; opacity: 0.7;
+    .topbar nav button:hover { background: var(--surface-2); color: var(--text); }
+    .topbar nav button.active {
+      background: var(--accent-soft); color: var(--accent-strong); font-weight: 600;
     }
-    .diff-wrapper { overflow-x: auto; border-radius: 8px; border: 1px solid var(--border); }
-    .missing { color: var(--warning); font-style: italic; opacity: 0.7; }
-    .review-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 12px; }
-    .review-table th, .review-table td {
-      padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--border);
+    .topbar .actions { display: flex; gap: 8px; align-items: center; }
+
+    /* ─── BREADCRUMBS ─── */
+    .breadcrumbs {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 10px 24px;
+      font-size: 12px; color: var(--text-muted);
+      display: flex; align-items: center; gap: 8px;
     }
-    .review-table th { color: var(--muted); font-weight: 600; text-transform: uppercase; font-size: 10px; letter-spacing: 0.5px; }
-    .severity-high { color: var(--danger); font-weight: 700; }
-    .severity-medium { color: var(--warning); font-weight: 600; }
+    .breadcrumbs .sep { color: var(--text-soft); }
+    .breadcrumbs .current { color: var(--text); font-weight: 500; }
+
+    /* ─── BUTTONS ─── */
+    .btn {
+      border: none; cursor: pointer; font-weight: 500; font-size: 13px;
+      padding: 8px 14px; border-radius: 6px; transition: all 0.15s;
+      display: inline-flex; align-items: center; gap: 6px;
+      font-family: inherit;
+    }
+    .btn-primary { background: var(--accent); color: white; }
+    .btn-primary:hover { background: var(--accent-strong); }
+    .btn-secondary { background: var(--surface-2); color: var(--text); border: 1px solid var(--border); }
+    .btn-secondary:hover { background: var(--surface); border-color: var(--border-strong); }
+    .btn-success { background: var(--success); color: white; }
+    .btn-success:hover { filter: brightness(0.95); }
+    .btn-ghost { background: none; color: var(--text-muted); }
+    .btn-ghost:hover { background: var(--surface-2); color: var(--text); }
+    .btn-sm { padding: 5px 10px; font-size: 12px; }
+
+    /* ─── MAIN CONTENT ─── */
+    main {
+      padding: 24px;
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+
+    /* ─── CARDS ─── */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 20px;
+      box-shadow: var(--shadow-sm);
+    }
+    .card h2 {
+      margin: 0 0 16px 0;
+      font-size: 15px; font-weight: 600;
+      color: var(--text);
+      display: flex; align-items: center; gap: 8px;
+    }
+    .card h3 {
+      margin: 0 0 12px 0;
+      font-size: 13px; font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase; letter-spacing: 0.5px;
+    }
+
+    /* ─── KPI TILES ─── */
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .kpi {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 18px 20px;
+      position: relative;
+      overflow: hidden;
+    }
+    .kpi-label {
+      font-size: 11px; font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase; letter-spacing: 1px;
+      margin-bottom: 8px;
+    }
+    .kpi-value {
+      font-size: 28px; font-weight: 700;
+      color: var(--text);
+      line-height: 1;
+    }
+    .kpi-trend {
+      font-size: 12px; color: var(--text-muted);
+      margin-top: 6px;
+    }
+    .kpi.accent { border-left: 3px solid var(--accent); }
+    .kpi.success { border-left: 3px solid var(--success); }
+    .kpi.warning { border-left: 3px solid var(--warning); }
+    .kpi.neutral { border-left: 3px solid var(--text-soft); }
+
+    /* ─── TABLES ─── */
+    table {
+      width: 100%; border-collapse: collapse;
+      font-size: 13px;
+    }
+    thead th {
+      text-align: left;
+      padding: 10px 12px;
+      font-size: 11px; font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase; letter-spacing: 0.5px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface-2);
+    }
+    tbody td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+      color: var(--text);
+    }
+    tbody tr:hover { background: var(--surface-2); cursor: pointer; }
+    tbody tr.no-hover:hover { background: transparent; cursor: default; }
+
+    /* ─── BADGES ─── */
+    .badge {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 3px 8px; border-radius: 12px;
+      font-size: 11px; font-weight: 600;
+      line-height: 1;
+    }
+    .badge-success { background: var(--success-soft); color: var(--success); }
+    .badge-warning { background: var(--warning-soft); color: var(--warning); }
+    .badge-danger  { background: var(--danger-soft);  color: var(--danger); }
+    .badge-accent  { background: var(--accent-soft);  color: var(--accent-strong); }
+    .badge-neutral { background: var(--surface-2);    color: var(--text-muted); }
+    .badge .dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: currentColor;
+    }
+
+    /* ─── ENTITY SUB-NAV (Master Data) ─── */
+    .sub-nav {
+      display: flex; gap: 4px;
+      padding: 4px;
+      background: var(--surface-2);
+      border-radius: 8px;
+      margin-bottom: 20px;
+      width: fit-content;
+    }
+    .sub-nav button {
+      background: none; border: none; cursor: pointer;
+      padding: 7px 14px; font-size: 13px; font-weight: 500;
+      color: var(--text-muted);
+      border-radius: 6px;
+      font-family: inherit;
+      transition: all 0.15s;
+    }
+    .sub-nav button:hover { color: var(--text); }
+    .sub-nav button.active {
+      background: var(--surface); color: var(--accent-strong); font-weight: 600;
+      box-shadow: var(--shadow-sm);
+    }
+
+    /* ─── FORMS ─── */
+    label.field {
+      display: block; margin-bottom: 12px;
+    }
+    label.field .lbl {
+      display: block; font-size: 12px; font-weight: 500;
+      color: var(--text-muted); margin-bottom: 4px;
+    }
+    select, input[type="text"], input[type="number"], textarea {
+      width: 100%; padding: 8px 10px;
+      background: var(--surface); color: var(--text);
+      border: 1px solid var(--border); border-radius: 6px;
+      font-size: 13px; font-family: inherit;
+    }
+    select:focus, input:focus, textarea:focus {
+      outline: none; border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-soft);
+    }
+
+    /* ─── MODAL ─── */
     .modal-backdrop {
-      position: fixed; inset: 0; background: rgba(0,0,0,0.7);
-      display: none; align-items: center; justify-content: center; z-index: 1000;
+      position: fixed; inset: 0;
+      background: rgba(15,23,42,0.4);
+      display: none; align-items: center; justify-content: center;
+      z-index: 200;
     }
     .modal-backdrop.open { display: flex; }
     .modal {
-      background: var(--panel); border: 1px solid var(--border);
-      border-radius: 10px; padding: 24px; max-width: 480px; width: 90%;
+      background: var(--surface);
+      border-radius: var(--radius-lg);
+      padding: 24px; width: 90%; max-width: 560px;
+      box-shadow: 0 20px 40px rgba(15,23,42,0.15);
     }
-    .modal h2 { margin: 0 0 16px; font-size: 18px; }
-    .modal label { display: block; margin-bottom: 14px; font-size: 13px; color: var(--muted); }
-    .modal select, .modal input {
-      width: 100%; margin-top: 6px; background: var(--bg); color: var(--text);
-      border: 1px solid var(--border); border-radius: 6px; padding: 8px;
-      font-size: 14px;
-    }
-    .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 18px; }
-    .match-card {
-      background: rgba(255,255,255,0.02); border: 1px solid var(--border);
-      border-left: 3px solid var(--success); border-radius: 8px;
-      padding: 14px; margin-bottom: 10px;
-    }
-    .match-card.medium { border-left-color: var(--warning); }
-    .match-card.low { border-left-color: var(--muted); }
-    .match-card .header {
-      display: flex; justify-content: space-between; margin-bottom: 8px;
-      font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted);
-    }
-    .match-card .prob { color: var(--success); font-weight: 700; }
-    .match-card.medium .prob { color: var(--warning); }
-    .match-card.low .prob { color: var(--muted); }
-    .match-card .pair {
-      display: grid; grid-template-columns: 1fr auto 1fr; gap: 12px; align-items: center;
-    }
-    .match-card .side { font-size: 13px; }
-    .match-card .arrow { color: var(--accent); font-size: 18px; font-weight: 700; }
-    .review-banner {
-      background: rgba(239, 91, 91, 0.08); border-left: 3px solid var(--danger);
-      padding: 12px 16px; border-radius: 6px; margin-top: 16px;
+    .modal h2 { margin: 0 0 16px 0; font-size: 17px; }
+    .modal-actions {
+      display: flex; gap: 8px; justify-content: flex-end;
+      margin-top: 20px;
     }
 
+    /* ─── UPLOAD ZONE ─── */
+    .upload-zone {
+      border: 2px dashed var(--border-strong);
+      border-radius: var(--radius-lg);
+      padding: 32px;
+      text-align: center;
+      background: var(--surface);
+      transition: all 0.15s;
+      cursor: pointer;
+    }
+    .upload-zone:hover, .upload-zone.dragover {
+      border-color: var(--accent);
+      background: var(--accent-soft);
+    }
+    .upload-zone input { display: none; }
+
+    /* ─── TOAST ─── */
+    #toast-container {
+      position: fixed; top: 70px; right: 24px;
+      z-index: 300;
+      display: flex; flex-direction: column; gap: 8px;
+    }
+    .toast {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--accent);
+      padding: 12px 16px; border-radius: 8px;
+      font-size: 13px;
+      box-shadow: var(--shadow-md);
+      min-width: 280px;
+      animation: slideIn 0.2s;
+    }
+    .toast.success { border-left-color: var(--success); }
+    .toast.error { border-left-color: var(--danger); }
+    @keyframes slideIn { from {transform: translateX(20px); opacity: 0;} to {transform: translateX(0); opacity: 1;} }
+
+    /* ─── EMPTY STATE ─── */
+    .empty-state {
+      padding: 48px; text-align: center;
+      color: var(--text-muted);
+    }
+    .empty-state h3 { color: var(--text); font-size: 16px; margin: 0 0 8px 0; }
+    .empty-state p { margin: 0 0 16px 0; font-size: 13px; }
+
+    /* ─── LOADER ─── */
+    .loader {
+      width: 16px; height: 16px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+      display: inline-block;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ─── SECTION GAP UTILITY ─── */
+    .row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .row-2-3 { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; }
+    .stack { display: flex; flex-direction: column; gap: 16px; }
   </style>
 </head>
 <body>
-  <div class="container">
-    <div class="header">
-      <div>
-        <h1>Data Quality <span>Service</span></h1>
-        <div class="subtitle">Automated profiling, schema inference, validation, and remediation</div>
-      </div>
-      <div class="subtitle" id="health">Connecting...</div>
+
+  <!-- ═══ TOP NAVIGATION ═══ -->
+  <header class="topbar">
+    <div class="logo">
+      <span class="logo-mark">⚡</span>
+      <span>Unified Data Platform</span>
     </div>
+    <nav>
+      <button class="active" data-tab="dashboard">Dashboard</button>
+      <button data-tab="master">Master Data</button>
+      <button data-tab="workspace">Workspace</button>
+      <button data-tab="lineage">Lineage</button>
+    </nav>
+    <div class="actions">
+      <button class="btn btn-primary" onclick="openUploadModal()">+ Connect Source</button>
+    </div>
+  </header>
 
-    <div class="grid">
-      <!-- Sidebar -->
-      <div>
-        <div class="panel">
-          <h2>Upload Data</h2>
-          <div class="upload-zone" id="upload-zone">
-            <p><strong>Drop a file here</strong></p>
-            <p>or click to browse</p>
-            <p style="font-size: 11px; margin-top: 12px;">CSV, Excel, JSON, Parquet, TSV, PDF, PDF</p>
-            <input type="file" id="file-input" accept=".csv,.xlsx,.xls,.json,.parquet,.tsv,.pdf">
-          </div>
+  <!-- ═══ BREADCRUMBS ═══ -->
+  <div class="breadcrumbs">
+    <span>Platform</span>
+    <span class="sep">›</span>
+    <span class="current" id="breadcrumb-current">Dashboard</span>
+  </div>
+
+  <!-- ═══ TOAST CONTAINER ═══ -->
+  <div id="toast-container"></div>
+
+  <!-- ═══ MAIN ═══ -->
+  <main>
+
+    <!-- ─── TAB: DASHBOARD ─── -->
+    <section class="tab-content active" id="tab-dashboard">
+      <div class="kpi-grid">
+        <div class="kpi accent">
+          <div class="kpi-label">Connected Sources</div>
+          <div class="kpi-value" id="kpi-sources">—</div>
+          <div class="kpi-trend">Active data inputs</div>
         </div>
+        <div class="kpi success">
+          <div class="kpi-label">Master Records</div>
+          <div class="kpi-value" id="kpi-records">—</div>
+          <div class="kpi-trend">Unified across sources</div>
+        </div>
+        <div class="kpi warning">
+          <div class="kpi-label">Duplicates Resolved</div>
+          <div class="kpi-value" id="kpi-merged">—</div>
+          <div class="kpi-trend">Auto-deduplicated</div>
+        </div>
+        <div class="kpi neutral">
+          <div class="kpi-label">Total Ingestions</div>
+          <div class="kpi-value" id="kpi-ingestions">—</div>
+          <div class="kpi-trend">Pipeline runs</div>
+        </div>
+      </div>
 
-        <div class="panel" style="margin-top: 16px;">
-          <h2>Datasets</h2>
-          <div class="dataset-list" id="dataset-list">
-            <div class="empty-state" style="padding: 24px 0;">
-              <p style="font-size: 13px;">No datasets loaded yet</p>
-            </div>
+      <div class="row-2-3">
+        <div class="card">
+          <h2>📊 Master Data by Entity</h2>
+          <table id="entity-summary-table">
+            <thead><tr><th>Entity</th><th>Records</th><th>Sources</th><th>Duplicates Resolved</th><th>Total Inputs</th></tr></thead>
+            <tbody><tr class="no-hover"><td colspan="5" style="text-align: center; color: var(--text-muted);">Loading...</td></tr></tbody>
+          </table>
+        </div>
+        <div class="card">
+          <h2>🔌 Source Types</h2>
+          <div id="source-types" style="font-size: 13px;">
+            <div style="margin-bottom: 8px;"><span class="badge badge-success"><span class="dot"></span>Active</span> CSV / Excel</div>
+            <div style="margin-bottom: 8px;"><span class="badge badge-success"><span class="dot"></span>Active</span> JSON / Parquet</div>
+            <div style="margin-bottom: 8px;"><span class="badge badge-success"><span class="dot"></span>Active</span> PDF (text + OCR)</div>
+            <div style="margin-bottom: 8px;"><span class="badge badge-neutral"><span class="dot"></span>Roadmap</span> SAP / ERP</div>
+            <div style="margin-bottom: 8px;"><span class="badge badge-neutral"><span class="dot"></span>Roadmap</span> SharePoint</div>
+            <div><span class="badge badge-neutral"><span class="dot"></span>Roadmap</span> Databases</div>
           </div>
         </div>
       </div>
 
-      <!-- Main content -->
-      <div class="panel results">
-        <div id="results-content">
-          <div class="empty-state">
-            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
-            </svg>
-            <h3>Upload a file to begin</h3>
-            <p>Profile, validate, and clean your data automatically</p>
+      <div style="margin-top: 16px;" class="card">
+        <h2>🕒 Recent Ingestion Activity</h2>
+        <table id="recent-activity-table">
+          <thead><tr><th>When</th><th>Source</th><th>Target Entity</th><th>New</th><th>Duplicates Found</th><th>Master Enriched</th></tr></thead>
+          <tbody><tr class="no-hover"><td colspan="6" style="text-align: center; color: var(--text-muted);">No activity yet — connect a source to begin.</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ─── TAB: MASTER DATA ─── -->
+    <section class="tab-content" id="tab-master">
+      <div class="sub-nav" id="master-subnav">
+        <button class="active" data-entity="Customers">Customers</button>
+        <button data-entity="Vendors">Vendors</button>
+        <button data-entity="Invoices">Invoices</button>
+        <button data-entity="Products">Products</button>
+      </div>
+      <div class="card">
+        <h2 id="master-title">Master Customers</h2>
+        <table id="master-table">
+          <thead><tr><td colspan="8" style="text-align: center; color: var(--text-muted);">Loading...</td></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ─── TAB: WORKSPACE ─── -->
+    <section class="tab-content" id="tab-workspace">
+      <div class="row-2-3">
+        <div class="card">
+          <h2>📁 Sources</h2>
+          <div id="workspace-dataset-list">
+            <div style="color: var(--text-muted); font-size: 13px;">No sources connected yet.</div>
           </div>
         </div>
+        <div class="card">
+          <h2>🔧 Tools</h2>
+          <div style="display: flex; flex-direction: column; gap: 8px;">
+            <button class="btn btn-secondary" onclick="ws_action('analyze')">📊 Profile Quality</button>
+            <button class="btn btn-secondary" onclick="ws_action('remediate')">🧹 Apply Fixes</button>
+            <button class="btn btn-secondary" onclick="ws_action('split')">🔀 Normalize Schema</button>
+            <button class="btn btn-secondary" onclick="ws_action('er')">🔗 Resolve Entities</button>
+            <button class="btn btn-secondary" onclick="ws_action('cfd')">🔁 Find Duplicates</button>
+            <button class="btn btn-secondary" onclick="ws_action('archived')">📦 View Archived</button>
+          </div>
+        </div>
+      </div>
+      <div class="card" style="margin-top: 16px;">
+        <div id="workspace-output" style="min-height: 200px;">
+          <div class="empty-state">
+            <h3>Select a source to begin</h3>
+            <p>Pick a dataset from the left panel, then choose an action.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─── TAB: LINEAGE ─── -->
+    <section class="tab-content" id="tab-lineage">
+      <div class="card">
+        <h2>📜 Ingestion History</h2>
+        <table id="lineage-table">
+          <thead><tr><th>Ingested At</th><th>Source File</th><th>Target Entity</th><th>New Records</th><th>Duplicates Found</th><th>Fields Enriched</th><th>Details</th></tr></thead>
+          <tbody><tr class="no-hover"><td colspan="7" style="text-align: center; color: var(--text-muted);">No ingestions yet.</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+  
+  <!-- ═══ PROVENANCE DRAWER ═══ -->
+  <div id="provenance-drawer-backdrop" style="position: fixed; inset: 0; background: rgba(15,23,42,0.3); display: none; z-index: 150;" onclick="closeProvenance()"></div>
+  <aside id="provenance-drawer" style="position: fixed; top: 0; right: 0; height: 100vh; width: 480px; background: var(--surface); box-shadow: -8px 0 24px rgba(15,23,42,0.12); transform: translateX(100%); transition: transform 0.25s ease; z-index: 200; overflow-y: auto;">
+    <div style="padding: 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; background: var(--surface); z-index: 1;">
+      <div>
+        <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px;">Master Record</div>
+        <h2 style="margin: 4px 0 0 0; font-size: 17px;" id="drawer-title">—</h2>
+      </div>
+      <button class="btn btn-ghost btn-sm" onclick="closeProvenance()" style="font-size: 18px;">×</button>
+    </div>
+    <div id="drawer-content" style="padding: 20px;"></div>
+  </aside>
+
+  </main>
+
+  <!-- ═══ UPLOAD MODAL ═══ -->
+  <div class="modal-backdrop" id="upload-modal">
+    <div class="modal">
+      <h2>Connect a New Source</h2>
+      <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 16px;">
+        Drag a file or click to browse. Supported: CSV, Excel, JSON, Parquet, TSV, PDF.
+      </p>
+      <label class="upload-zone" id="upload-zone">
+        <input type="file" id="upload-file" accept=".csv,.xlsx,.xls,.json,.parquet,.tsv,.pdf">
+        <div style="font-size: 28px; margin-bottom: 8px;">📁</div>
+        <div style="font-weight: 600; margin-bottom: 4px;">Drop a file here or click to browse</div>
+        <div style="color: var(--text-muted); font-size: 12px;">The platform will auto-profile, standardize, and ingest into the right master entity.</div>
+      </label>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" onclick="closeUploadModal()">Cancel</button>
       </div>
     </div>
   </div>
 
   <script>
-    const state = { activeDataset: null, datasets: [] };
+    // ═════════════════════════════════════════════════════════════════════
+    //                   STATE + UTILITIES
+    // ═════════════════════════════════════════════════════════════════════
+    const state = {
+      tab: 'dashboard',
+      datasets: [],
+      activeDataset: null,
+      masterEntity: 'Customers',
+    };
 
-    async function api(path, opts = {}) {
-      const res = await fetch(path, opts);
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Request failed');
+    function $(id) { return document.getElementById(id); }
+    function escapeHtml(s) {
+      return String(s == null ? '' : s)
+        .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+        .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+    }
+    function escapeAttr(s) { return escapeHtml(s); }
+
+    async function api(url, opts) {
+      const r = await fetch(url, opts);
+      const text = await r.text();
+      let data;
+      try { data = JSON.parse(text); }
+      catch { data = { error: text || 'Invalid response' }; }
+      if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
       return data;
     }
 
-    async function refreshDatasets() {
+    function toast(msg, type='info') {
+      const t = document.createElement('div');
+      t.className = `toast ${type}`;
+      t.innerHTML = msg;
+      $('toast-container').appendChild(t);
+      setTimeout(() => t.remove(), 5000);
+    }
+
+    // ═════════════════════════════════════════════════════════════════════
+    //                   TAB NAVIGATION
+    // ═════════════════════════════════════════════════════════════════════
+    document.querySelectorAll('.topbar nav button').forEach(btn => {
+      btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+    });
+
+    function switchTab(name) {
+      state.tab = name;
+      document.querySelectorAll('.topbar nav button').forEach(b =>
+        b.classList.toggle('active', b.dataset.tab === name));
+      document.querySelectorAll('.tab-content').forEach(s =>
+        s.classList.toggle('active', s.id === `tab-${name}`));
+      const labels = {
+        dashboard: 'Dashboard',
+        master: 'Master Data',
+        workspace: 'Workspace',
+        lineage: 'Lineage',
+      };
+      $('breadcrumb-current').textContent = labels[name] || name;
+      // Refresh data for the active tab
+      if (name === 'dashboard') refreshDashboard();
+      else if (name === 'master') refreshMaster();
+      else if (name === 'workspace') refreshWorkspace();
+      else if (name === 'lineage') refreshLineage();
+    }
+
+    // ═════════════════════════════════════════════════════════════════════
+    //                   DASHBOARD TAB
+    // ═════════════════════════════════════════════════════════════════════
+    async function refreshDashboard() {
       try {
-        state.datasets = await api('/api/datasets');
-        renderDatasets();
-      } catch (e) { toast(e.message, 'error'); }
-    }
-
-    function renderDatasets() {
-      const list = document.getElementById('dataset-list');
-      if (!state.datasets.length) {
-        list.innerHTML = '<div class="empty-state" style="padding: 24px 0;"><p style="font-size: 13px;">No datasets loaded yet</p></div>';
-        return;
-      }
-      list.innerHTML = state.datasets.map(d => {
-        const filename = (d.filename || d.source).split('/').pop().split('::').pop();
-        return `
-        <div class="dataset-item ${d.dataset_id === state.activeDataset ? 'active' : ''}" data-id="${d.dataset_id}">
-          <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
-            <div style="min-width: 0; flex: 1;">
-              <div class="name" title="${escapeAttr(filename)}" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(filename)}</div>
-              <div class="meta">${d.rows} rows • ${d.columns} cols${d.remediated ? ' • ✓ cleaned' : ''}</div>
-            </div>
-            <button class="ds-delete" data-id="${d.dataset_id}" data-name="${escapeAttr(filename)}"
-              title="Delete this dataset"
-              style="background: transparent; border: 1px solid var(--border); color: var(--muted); border-radius: 4px; padding: 2px 6px; cursor: pointer; font-size: 11px; line-height: 1;">
-              ×
-            </button>
-          </div>
-        </div>
-      `;}).join('');
-
-      // Row click selects the dataset, but the × button deletes it.
-      list.querySelectorAll('.dataset-item').forEach(el => {
-        el.addEventListener('click', (e) => {
-          if (e.target.closest('.ds-delete')) return;  // delete handler takes over
-          selectDataset(el.dataset.id);
-        });
-      });
-      list.querySelectorAll('.ds-delete').forEach(btn => {
-        btn.addEventListener('click', async (e) => {
-          e.stopPropagation();
-          const id = btn.dataset.id;
-          const name = btn.dataset.name;
-          if (!confirm(`Delete "${name}" from the catalog? This removes the dataset, all its versions, and analysis history. Archived rows are kept.`)) return;
-          try {
-            const res = await fetch(`/api/datasets/${id}`, { method: 'DELETE' });
-            const data = await res.json();
-            if (!res.ok) throw new Error(data.error || 'Delete failed');
-            toast(`Deleted ${name}`, 'success');
-            if (state.activeDataset === id) {
-              state.activeDataset = null;
-              document.getElementById('results-content').innerHTML = `
-                <div class="empty-state">
-                  <h3>Upload a file to begin</h3>
-                  <p>Profile, validate, and clean your data automatically</p>
-                </div>`;
-            }
-            await refreshDatasets();
-          } catch (e2) {
-            toast(e2.message, 'error');
-          }
-        });
-      });
-    }
-
-    async function selectDataset(id) {
-      state.activeDataset = id;
-      renderDatasets();
-      const info = await api(`/api/datasets/${id}`);
-      renderDatasetView(info);
-    }
-
-    function renderDatasetView(info) {
-      const html = `
-        <h2 style="margin: 0 0 8px;">${info.source.split('/').pop().split('::').pop()}</h2>
-        <div style="color: var(--muted); font-size: 13px; margin-bottom: 20px;">
-          ${info.rows} rows • ${info.columns.length} columns • Loaded ${new Date(info.loaded_at).toLocaleString()}
-        </div>
-        <div class="actions">
-          <button class="btn" onclick="analyzeDataset()">Analyze Quality</button>
-          <button class="btn btn-secondary" onclick="remediateDataset()">Apply Fixes</button>
-          <button class="btn btn-secondary" onclick="exportDataset()">Export CSV</button>
-          <button class="btn btn-secondary" onclick="window.open('/api/datasets/${info.dataset_id}/report', '_blank')">View Report</button>
-          <button class="btn btn-success" onclick="materializeNormalization()">Split Into Tables</button>
-          <button class="btn btn-success" onclick="openEntityResolutionDialog()">Resolve Entities</button>
-          <button class="btn btn-success" onclick="openCrossFileDedupDialog()">Find Duplicates Across Files</button>
-          <button class="btn btn-secondary" onclick="viewArchivedRows()">View Archived Rows</button>
-        </div>
-        <div id="analysis-output" style="margin-top: 24px;"></div>
-      `;
-      document.getElementById('results-content').innerHTML = html;
-    }
-
-    async function analyzeDataset() {
-      const out = document.getElementById('analysis-output');
-      out.innerHTML = '<div class="loader"></div> Analyzing... (this can take 10-30 seconds)';
-      try {
-        const result = await api(`/api/datasets/${state.activeDataset}/analyze`, {
-          method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({})
-        });
-        renderAnalysis(result);
-        toast('Analysis complete', 'success');
-      } catch (e) { out.innerHTML = ''; toast(e.message, 'error'); }
-    }
-
-    function renderAnalysis(r) {
-      const summary = r.profile_summary || {};
-      const issues = r.quality_issues || {};
-      const findings = r.custom_findings || {};
-      const schema = r.inferred_schema || {};
-
-      const stats = `
-        <div class="stat-grid">
-          <div class="stat"><div class="label">Rows</div><div class="value">${r.row_count}</div></div>
-          <div class="stat"><div class="label">Columns</div><div class="value">${r.column_count}</div></div>
-          <div class="stat ${summary.alerts_count > 0 ? 'warn' : 'success'}"><div class="label">Alerts</div><div class="value">${summary.alerts_count ?? 0}</div></div>
-          <div class="stat ${(issues.exact_duplicates?.count ?? 0) > 0 ? 'danger' : 'success'}"><div class="label">Duplicates</div><div class="value">${issues.exact_duplicates?.count ?? 0}</div></div>
-        </div>
-      `;
-
-      const alerts = (summary.alerts || []).slice(0, 10).map(a =>
-        `<div class="issue">${a}</div>`
-      ).join('');
-
-      const constantCols = (issues.constant_columns || []).map(c =>
-        `<div class="issue info">Column "${c}" has only one unique value</div>`
-      ).join('');
-
-      const customFindingsHtml = Object.entries(findings).map(([col, f]) => {
-        const lines = Object.entries(f).map(([k, v]) =>
-          `<div style="font-size: 12px; color: var(--muted);">${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}</div>`
-        ).join('');
-        return `<div class="issue info"><strong>${col}</strong>${lines}</div>`;
-      }).join('');
-
-      const schemaSql = schema.create_statement || '';
-
-      // Schema normalization rendering
-      const norm = r.normalization || {};
-      let normalizationHtml = '';
-      if (norm.is_denormalized && norm.entity_count > 0) {
-        const entitiesHtml = (norm.entities || []).map(e => `
-          <div class="issue info">
-            <strong>${escapeHtml(e.entity_name)}</strong> entity
-            (${e.distinct_rows} distinct rows • ${Math.round(e.reduction_ratio * 100)}% reduction)
-            <div style="font-size: 12px; color: var(--muted); margin-top: 4px;">
-              Columns: ${e.columns.map(c => `<code>${escapeHtml(c)}</code>`).join(', ')}
-            </div>
-          </div>
-        `).join('');
-
-        const ddlHtml = Object.entries(norm.create_statements || {}).map(([name, ddl]) =>
-          `<div style="margin-bottom: 12px;"><pre>${escapeHtml(ddl)}</pre></div>`
-        ).join('');
-
-        normalizationHtml = `
-          <div class="section">
-            <h3>🏗️ Schema Normalization (1NF → 3NF)</h3>
-            <div class="review-banner" style="border-left-color: var(--accent);">
-              Detected <strong>${norm.entity_count}</strong> separate entit${norm.entity_count > 1 ? 'ies' : 'y'}
-              hidden inside this flat table. Below is the normalized schema with proper foreign keys.
-            </div>
-            <div style="margin-top: 12px;">${entitiesHtml}</div>
-            <h3 style="margin-top: 20px;">Generated Normalized DDL</h3>
-            ${ddlHtml}
-          </div>
-        `;
-      }
-
-      const consistency = r.consistency || {};
-      const consIssues = consistency.issues || [];
-      let consistencyHtml = '';
-      if (consistency.issue_count > 0) {
-        const rows = consIssues.slice(0, 20).map(iss => `
-          <tr>
-            <td>${iss.row_index}</td>
-            <td>${escapeHtml(iss.name || '')}</td>
-            <td>${escapeHtml(iss.email || '')}</td>
-            <td>${iss.match_score}%</td>
-            <td class="severity-${iss.severity}">${(iss.severity || '').toUpperCase()}</td>
-          </tr>
-        `).join('');
-        consistencyHtml = `
-          <div class="section">
-            <h3>⚠️ Records Needing Human Review</h3>
-            <div class="review-banner">
-              <strong>${consistency.issue_count}</strong> row(s) have fields that don't match
-              (e.g. name vs email mismatch). These are <strong>flagged, not auto-fixed</strong> —
-              they could be legitimate aliases or actual data corruption. Manual review required.
-            </div>
-            <div class="diff-wrapper" style="margin-top: 12px;">
-              <table class="review-table">
-                <thead>
-                  <tr><th>Row</th><th>Name</th><th>Email</th><th>Match</th><th>Severity</th></tr>
-                </thead>
-                <tbody>${rows}</tbody>
-              </table>
-            </div>
-          </div>
-        `;
-      }
-
-      document.getElementById('analysis-output').innerHTML = `
-        ${stats}
-        ${alerts ? `<div class="section"><h3>ydata-profiling Alerts</h3>${alerts}</div>` : ''}
-        ${constantCols ? `<div class="section"><h3>Constant Columns</h3>${constantCols}</div>` : ''}
-        ${customFindingsHtml ? `<div class="section"><h3>Custom Findings</h3>${customFindingsHtml}</div>` : ''}
-        ${consistencyHtml}
-        ${normalizationHtml}
-        ${schemaSql ? `<div class="section"><h3>Inferred Schema (Single Table)</h3><pre>${schemaSql}</pre></div>` : ''}
-      `;
-    }
-
-    async function remediateDataset() {
-      const out = document.getElementById('analysis-output');
-      const loadingHtml = '<div class="loader"></div> Applying fixes...';
-      if (out) out.innerHTML = loadingHtml;
-      try {
-        const result = await api(`/api/datasets/${state.activeDataset}/remediate`, {
-          method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({})
-        });
-        toast(`Applied ${result.total_changes} fixes`, 'success');
-        renderDiff(result);
-        refreshDatasets();
-      } catch (e) {
-        if (out) out.innerHTML = '';
-        toast(e.message, 'error');
-      }
-    }
-
-    function renderDiff(result) {
-      const cols = result.columns || [];
-      const before = result.before_preview || [];
-      const after = result.after_preview || [];
-
-      const changeSummary = Object.entries(result.change_log || {})
-        .map(([col, log]) => {
-          const extra = log.clusters_merged ? ` • ${log.clusters_merged} clusters merged` : '';
-          return `<div class="issue info"><strong>${col}</strong> (${log.type}): ${log.changes} changes${extra}</div>`;
-        }).join('');
-
-      // Only show columns that had changes (or first 6 if no changes)
-      const changedCols = cols.filter(col => {
-        for (let i = 0; i < Math.min(15, before.length); i++) {
-          const b = before[i] || {}, a = after[i] || {};
-          if (String(b[col] ?? '') !== String(a[col] ?? '')) return true;
+        const s = await api('/api/platform/summary');
+        $('kpi-sources').textContent = s.total_sources || 0;
+        $('kpi-ingestions').textContent = s.total_ingestions || 0;
+        let totalR = 0, totalM = 0;
+        const rows = [];
+        for (const [name, st] of Object.entries(s.entities || {})) {
+          totalR += st.rows || 0;
+          totalM += st.duplicates_merged || 0;
+          rows.push(`<tr onclick="goToMaster('${name}')">
+            <td><strong>${escapeHtml(name)}</strong></td>
+            <td>${st.rows}</td>
+            <td>${st.sources}</td>
+            <td>${st.duplicates_merged > 0 ? `<span class="badge badge-warning">${st.duplicates_merged}</span>` : '0'}</td>
+            <td style="color: var(--text-muted);">${st.total_inputs}</td>
+          </tr>`);
         }
-        return false;
-      });
-      const displayCols = changedCols.length > 0 ? changedCols : cols.slice(0, 6);
+        $('kpi-records').textContent = totalR;
+        $('kpi-merged').textContent = totalM;
+        $('entity-summary-table').querySelector('tbody').innerHTML =
+          rows.join('') || '<tr class="no-hover"><td colspan="5" style="text-align: center; color: var(--text-muted);">No data yet</td></tr>';
 
-      let rows = '';
-      for (let i = 0; i < Math.min(15, before.length); i++) {
-        const b = before[i] || {}, a = after[i] || {};
-        rows += '<tr>';
-        displayCols.forEach(col => {
-          const bv = String(b[col] ?? '').trim(), av = String(a[col] ?? '').trim();
-          const bvDisplay = bv === '' ? '<span class="missing">∅ missing</span>' : escapeHtml(bv);
-          const avDisplay = av === '' ? '<span class="missing">∅ missing</span>' : escapeHtml(av);
-          if (bv === av) {
-            rows += `<td title="${escapeAttr(av)}">${avDisplay}</td>`;
-          } else {
-            rows += `<td title="Was: ${escapeAttr(bv)} → Now: ${escapeAttr(av)}">
-              <div class="original">${bvDisplay}</div>
-              <div class="changed">${avDisplay}</div>
-            </td>`;
-          }
-        });
-        rows += '</tr>';
+        // Recent activity
+        const lin = await api('/api/platform/lineage');
+        const log = (lin.log || []).slice(0, 10);
+        if (log.length === 0) {
+          $('recent-activity-table').querySelector('tbody').innerHTML =
+            '<tr class="no-hover"><td colspan="6" style="text-align: center; color: var(--text-muted);">No activity yet — connect a source to begin.</td></tr>';
+        } else {
+          $('recent-activity-table').querySelector('tbody').innerHTML = log.map(r => {
+            const when = new Date(r.ingested_at).toLocaleString();
+            const fn = r.filename || r.dataset_id;
+            return `<tr class="no-hover">
+              <td style="color: var(--text-muted);">${escapeHtml(when)}</td>
+              <td><strong>${escapeHtml(fn)}</strong></td>
+              <td><span class="badge badge-accent">${escapeHtml(r.target_table)}</span></td>
+              <td>${r.rows_inserted > 0 ? `<span class="badge badge-success">+${r.rows_inserted}</span>` : '0'}</td>
+              <td>${r.rows_merged > 0 ? `<span class="badge badge-warning">${r.rows_merged}</span>` : '0'}</td>
+              <td>${r.fields_standardized > 0 ? `<span style="color: var(--success);">+${r.fields_standardized}</span>` : '—'}</td>
+            </tr>`;
+          }).join('');
+        }
+      } catch (e) {
+        toast('Failed to load dashboard: ' + e.message, 'error');
       }
-
-      const headerRow = '<tr>' + displayCols.map(c => `<th>${escapeHtml(c)}</th>`).join('') + '</tr>';
-
-      document.getElementById('analysis-output').innerHTML = `
-        <div class="stat-grid">
-          <div class="stat success"><div class="label">Total Fixes</div><div class="value">${result.total_changes}</div></div>
-          <div class="stat ${result.total_failures > 0 ? 'warn' : 'success'}"><div class="label">Failures</div><div class="value">${result.total_failures}</div></div>
-          <div class="stat"><div class="label">Columns Cleaned</div><div class="value">${Object.keys(result.change_log || {}).length}</div></div>
-          <div class="stat"><div class="label">Preview Rows</div><div class="value">${Math.min(15, before.length)}</div></div>
-        </div>
-        ${changeSummary ? `<div class="section"><h3>Changes by Column</h3>${changeSummary}</div>` : ''}
-        <div class="section">
-          <h3>Before / After (first 15 rows — red = original, green = cleaned)</h3>
-          <div class="diff-wrapper">
-            <table class="diff-table">
-              <thead>${headerRow}</thead>
-              <tbody>${rows}</tbody>
-            </table>
-          </div>
-        </div>
-      `;
     }
 
-    function escapeHtml(s) {
-      return String(s).replace(/[&<>"\']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-    }
-    function escapeAttr(s) {
-      return escapeHtml(s).replace(/\n/g, ' ');
+    function goToMaster(entity) {
+      state.masterEntity = entity;
+      switchTab('master');
     }
 
-    function exportDataset() {
-      window.open(`/api/datasets/${state.activeDataset}/export?format=csv`, '_blank');
-    }
+    // ═════════════════════════════════════════════════════════════════════
+    //                   MASTER DATA TAB
+    // ═════════════════════════════════════════════════════════════════════
+    document.querySelectorAll('#master-subnav button').forEach(btn => {
+      btn.addEventListener('click', () => {
+        state.masterEntity = btn.dataset.entity;
+        document.querySelectorAll('#master-subnav button').forEach(b =>
+          b.classList.toggle('active', b.dataset.entity === state.masterEntity));
+        refreshMaster();
+      });
+    });
 
-    async function materializeNormalization() {
-      const out = document.getElementById('analysis-output');
-      if (out) out.innerHTML = '<div class="loader"></div> Splitting into normalized tables...';
+    async function refreshMaster() {
+      // Sync sub-nav
+      document.querySelectorAll('#master-subnav button').forEach(b =>
+        b.classList.toggle('active', b.dataset.entity === state.masterEntity));
+      $('master-title').textContent = 'Master ' + state.masterEntity;
+
       try {
-        const result = await api(`/api/datasets/${state.activeDataset}/materialize`, {
-          method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({})
-        });
-        if (!result.materialized) {
-          toast(result.reason || 'Could not materialize', 'error');
-          out.innerHTML = '';
+        const r = await api(`/api/platform/master/${state.masterEntity}?limit=1000`);
+        const rows = r.rows || [];
+        const tbl = $('master-table');
+        if (!rows.length) {
+          tbl.querySelector('thead').innerHTML = '<tr><th>No data</th></tr>';
+          tbl.querySelector('tbody').innerHTML = `<tr class="no-hover"><td style="padding: 32px; text-align: center; color: var(--text-muted);">No ${state.masterEntity} ingested yet. Use Connect Source to begin.</td></tr>`;
           return;
         }
-        renderMaterialization(result);
-        toast(`Created ${result.entity_count + 1} normalized tables`, 'success');
+        // Build columns: prioritize key business fields, deprioritize bookkeeping
+        const allCols = Object.keys(rows[0]);
+        const priority = ['customer_id','vendor_id','sku','invoice_no','full_name','vendor_name','product_name','email','phone','contact_phone','amount','status','country'];
+        const lineage = ['source_dataset_id','ingested_at','last_updated','merged_from_count'];
+        const showCols = [
+          ...priority.filter(c => allCols.includes(c)),
+          ...allCols.filter(c => !priority.includes(c) && !lineage.includes(c) && c !== 'archived_at' && c !== 'confidence_score' && c !== 'source_row_index'),
+        ].slice(0, 7);
+
+        tbl.querySelector('thead').innerHTML = '<tr>' +
+          showCols.map(c => `<th>${escapeHtml(c)}</th>`).join('') +
+          '<th>Sources</th></tr>';
+        // Store rows for drawer drill-down
+        state.lastMasterRows = rows;
+        tbl.querySelector('tbody').innerHTML = rows.map((row, idx) => {
+          const cells = showCols.map(c => `<td>${escapeHtml(row[c] ?? '')}</td>`).join('');
+          const count = row.merged_from_count || 1;
+          const sourcesBadge = count > 1
+            ? `<span class="badge badge-success">${count} sources</span>`
+            : `<span class="badge badge-neutral">1 source</span>`;
+          return `<tr onclick="openProvenance(${idx})" title="View provenance">${cells}<td>${sourcesBadge}</td></tr>`;
+        }).join('');
       } catch (e) {
-        if (out) out.innerHTML = '';
-        toast(e.message, 'error');
+        toast('Failed to load master data: ' + e.message, 'error');
       }
     }
 
-    function renderMaterialization(r) {
-      const tablesHtml = (r.tables || []).map(t => {
-        const cols = t.columns;
-        const headerRow = '<tr>' + cols.map(c => `<th>${escapeHtml(c)}</th>`).join('') + '</tr>';
-        const previewRows = (t.preview || []).map(row =>
-          '<tr>' + cols.map(c => `<td>${escapeHtml(String(row[c] ?? ''))}</td>`).join('') + '</tr>'
-        ).join('');
-        return `
-          <div class="section">
-            <h3>📊 ${escapeHtml(t.name)} <span style="color: var(--muted); font-weight: normal; font-size: 12px;">— ${t.rows} rows, ${cols.length} columns</span></h3>
-            <div class="diff-wrapper">
-              <table class="diff-table">
-                <thead>${headerRow}</thead>
-                <tbody>${previewRows}</tbody>
-              </table>
-            </div>
-          </div>
-        `;
-      }).join('');
-
-      const ddlHtml = Object.entries(r.create_statements || {}).map(([name, ddl]) =>
-        `<div style="margin-bottom: 10px;"><pre>${escapeHtml(ddl)}</pre></div>`
-      ).join('');
-
-      document.getElementById('analysis-output').innerHTML = `
-        <div class="stat-grid">
-          <div class="stat success"><div class="label">Entities Extracted</div><div class="value">${r.entity_count}</div></div>
-          <div class="stat success"><div class="label">Total Tables</div><div class="value">${r.tables.length}</div></div>
-          <div class="stat"><div class="label">Status</div><div class="value" style="font-size: 14px;">Materialized</div></div>
-          <div class="stat"><div class="label">Download</div><div class="value" style="font-size: 12px;"><a href="/api/datasets/${state.activeDataset}/normalized.zip" style="color: var(--accent);">ZIP file ↓</a></div></div>
-        </div>
-        <div class="section"><h3>Normalized Tables — Preview</h3>${tablesHtml}</div>
-        <div class="section"><h3>Generated DDL</h3>${ddlHtml}</div>
-      `;
+    // ═════════════════════════════════════════════════════════════════════
+    //                   WORKSPACE TAB
+    // ═════════════════════════════════════════════════════════════════════
+    async function refreshWorkspace() {
+      try {
+        const r = await api('/api/datasets');
+        state.datasets = r.datasets || r || [];
+        renderWorkspaceSources();
+      } catch (e) {
+        $('workspace-dataset-list').innerHTML = '<div style="color: var(--danger);">Failed to load sources.</div>';
+      }
     }
 
-    function openCrossFileDedupDialog() {
-      const list = document.getElementById('cfd-dataset-list');
-      list.innerHTML = '';
+    function renderWorkspaceSources() {
       if (!state.datasets.length) {
-        toast('Upload some files first', 'error');
+        $('workspace-dataset-list').innerHTML = '<div style="color: var(--text-muted); font-size: 13px;">No sources connected yet.</div>';
         return;
       }
-      for (const d of state.datasets) {
-        const filename = d.filename || d.source.split('/').pop();
-        const row = document.createElement('label');
-        row.style.cssText = 'display: flex; align-items: center; gap: 10px; padding: 8px; cursor: pointer; font-size: 13px; border-radius: 4px;';
-        row.innerHTML = `
-          <input type="checkbox" value="${d.dataset_id}" style="margin: 0;">
-          <span><strong>${filename}</strong> <span style="color: var(--muted);">(${d.rows} rows)</span></span>
-        `;
-        list.appendChild(row);
-      }
-      // Always reset to step 1 when reopening
-      document.getElementById('cfd-step-files').style.display = 'block';
-      document.getElementById('cfd-step-columns').style.display = 'none';
-      document.getElementById('cfd-modal').classList.add('open');
+      $('workspace-dataset-list').innerHTML = state.datasets.map(d => {
+        const fn = (d.filename || d.source).split('/').pop();
+        const active = d.dataset_id === state.activeDataset;
+        return `<div onclick="selectWorkspaceDataset('${d.dataset_id}')"
+                     style="padding: 8px 10px; border-radius: 6px; cursor: pointer; margin-bottom: 4px;
+                            ${active ? 'background: var(--accent-soft); border-left: 3px solid var(--accent);' : 'border-left: 3px solid transparent;'}
+                            transition: background 0.15s;">
+          <div style="font-size: 13px; font-weight: ${active ? '600' : '500'}; color: var(--text);">${escapeHtml(fn)}</div>
+          <div style="font-size: 11px; color: var(--text-muted);">${d.rows || '?'} rows · ${(d.columns && d.columns.length) || d.columns || '?'} cols</div>
+        </div>`;
+      }).join('');
     }
 
-    function closeCrossFileDedupDialog() {
-      document.getElementById('cfd-modal').classList.remove('open');
+    function selectWorkspaceDataset(id) {
+      state.activeDataset = id;
+      renderWorkspaceSources();
+      $('workspace-output').innerHTML = '<div class="empty-state"><h3>Source selected</h3><p>Pick a tool from the right panel.</p></div>';
     }
 
-    let _cfdSelectedDatasets = [];
-    let _cfdDetectedColumns = [];
-
-    async function cfdScanForColumns() {
-      const checked = Array.from(
-        document.querySelectorAll('#cfd-dataset-list input[type=checkbox]:checked')
-      ).map(el => el.value);
-      if (checked.length < 2) {
-        toast('Pick at least 2 files', 'error');
-        return;
-      }
-      _cfdSelectedDatasets = checked;
+    async function ws_action(action) {
+      if (!state.activeDataset) { toast('Pick a source first', 'error'); return; }
+      const out = $('workspace-output');
+      out.innerHTML = '<div class="empty-state"><div class="loader"></div><p>Running...</p></div>';
       try {
-        const result = await api('/api/suggest-dedup-columns', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ dataset_ids: checked }),
-        });
-        cfdRenderColumnPicker(result.groups || []);
-        document.getElementById('cfd-step-files').style.display = 'none';
-        document.getElementById('cfd-step-columns').style.display = 'block';
-      } catch (e) {
-        toast(e.message, 'error');
-      }
-    }
-
-    let _cfdGroups = [];
-
-    function cfdRenderColumnPicker(groups) {
-      _cfdGroups = groups;
-      const list = document.getElementById('cfd-column-list');
-      list.innerHTML = '';
-      if (!groups.length) {
-        list.innerHTML = `<div style="color: var(--muted); padding: 12px;">No identifier columns appear in 2+ files. These files don\'t share a record key.</div>`;
-        return;
-      }
-
-      for (let i = 0; i < groups.length; i++) {
-        const g = groups[i];
-        const cls = g.classification;
-        const isDedup = cls === 'primary_key_match';
-        const isFK    = cls === 'foreign_key_link';
-
-        let badge, borderColor;
-        if (isDedup) {
-          badge = '<span style="font-size: 10px; font-weight: 700; padding: 3px 10px; background: rgba(56,212,168,0.18); color: var(--success); border-radius: 10px;">★ DEDUP MATCH</span>';
-          borderColor = 'var(--success)';
-        } else if (isFK) {
-          badge = '<span style="font-size: 10px; font-weight: 700; padding: 3px 10px; background: rgba(248,113,113,0.18); color: var(--danger); border-radius: 10px;">✗ FOREIGN KEY</span>';
-          borderColor = 'var(--danger)';
+        if (action === 'analyze') {
+          const r = await api(`/api/datasets/${state.activeDataset}/analyze`, { method: 'POST' });
+          renderAnalyzeResult(r);
+        } else if (action === 'remediate') {
+          const r = await api(`/api/datasets/${state.activeDataset}/remediate`, {
+            method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'
+          });
+          renderRemediateResult(r);
+        } else if (action === 'archived') {
+          const r = await api(`/api/datasets/${state.activeDataset}/archived-rows`);
+          renderArchivedRows(r);
         } else {
-          badge = '<span style="font-size: 10px; font-weight: 700; padding: 3px 10px; background: rgba(245,158,11,0.18); color: var(--warning); border-radius: 10px;">? UNCERTAIN</span>';
-          borderColor = 'var(--warning)';
+          out.innerHTML = `<div class="empty-state"><h3>Not yet wired in new UI</h3><p>Action: ${action}. Existing API still works — use platform overview for now.</p></div>`;
         }
-
-        const membersHtml = g.members.map(m => `
-          <div style="font-size: 12px; margin-top: 4px;">
-            <span style="color: var(--accent);"><strong>${escapeHtml(m.dataset_name)}</strong></span>
-            →  <code>${escapeHtml(m.column)}</code>
-            <span style="color: var(--muted); font-size: 11px; margin-left: 8px;">samples: ${m.sample_values.slice(0, 3).map(s => `<code>${escapeHtml(s)}</code>`).join(', ')}</span>
-          </div>
-        `).join('');
-
-        const row = document.createElement('label');
-        row.style.cssText = `display: block; padding: 12px; margin-bottom: 10px; border: 1px solid var(--border); border-left: 3px solid ${borderColor}; border-radius: 6px; cursor: pointer; background: rgba(255,255,255,0.02);`;
-        row.innerHTML = `
-          <div style="display: flex; align-items: flex-start; gap: 10px;">
-            <input type="checkbox" value="${i}" ${isDedup ? 'checked' : ''} style="margin: 4px 0 0 0;">
-            <div style="flex: 1; min-width: 0;">
-              <div style="display: flex; align-items: center; gap: 10px;">
-                ${badge}
-                <span style="color: var(--muted); font-size: 11px;">${g.value_overlap_pct}% value overlap</span>
-              </div>
-              <div style="margin-top: 8px;">${membersHtml}</div>
-              <div style="font-size: 11px; color: var(--muted); margin-top: 8px; font-style: italic;">
-                ${escapeHtml(g.reasoning)}
-              </div>
-            </div>
-          </div>
-        `;
-        list.appendChild(row);
-      }
-    }
-
-    function cfdBackToFiles() {
-      document.getElementById('cfd-step-columns').style.display = 'none';
-      document.getElementById('cfd-step-files').style.display = 'block';
-    }
-
-    async function cfdRunWithSelectedColumns() {
-      const checkedIdx = Array.from(
-        document.querySelectorAll('#cfd-column-list input[type=checkbox]:checked')
-      ).map(el => parseInt(el.value, 10));
-      if (!checkedIdx.length) {
-        toast('Pick at least 1 column group', 'error'); return;
-      }
-      // Flatten the selected groups into a column-name list to send to the backend.
-      // The backend\'s value-based matcher will figure out the cross-file matching.
-      const chosenCols = new Set();
-      for (const i of checkedIdx) {
-        for (const m of _cfdGroups[i].members) {
-          chosenCols.add(m.column);
-        }
-      }
-      closeCrossFileDedupDialog();
-      const out = document.getElementById('analysis-output');
-      if (out) out.innerHTML = '<div class="loader"></div> Finding duplicates...';
-      try {
-        const result = await api('/api/find-duplicates-across-files', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ dataset_ids: _cfdSelectedDatasets, id_columns: Array.from(chosenCols) }),
-        });
-        renderCrossFileDedup(result);
-        toast(`Found ${result.summary.total_clusters} duplicate clusters`, 'success');
       } catch (e) {
-        if (out) out.innerHTML = '';
-        toast(e.message, 'error');
+        toast('Action failed: ' + e.message, 'error');
+        out.innerHTML = `<div class="empty-state"><h3 style="color: var(--danger);">Error</h3><p>${escapeHtml(e.message)}</p></div>`;
       }
     }
 
-    async function archiveCrossFileDuplicates() {
-      const r = _cfdLastResult;
-      if (!r || !r.duplicate_clusters || !r.duplicate_clusters.length) {
-        toast('Nothing to archive', 'error'); return;
-      }
-      if (!confirm(`Archive ${r.summary.rows_that_would_be_archived} duplicate rows? They will be removed from the active datasets but kept in the archive (recoverable).`)) {
-        return;
-      }
-      // Build the archive plan from the clusters
-      const planByDataset = {};
-      for (const cluster of r.duplicate_clusters) {
-        const keep = cluster.recommended_keep || {};
-        for (const occ of cluster.occurrences) {
-          if (occ.dataset_id === keep.dataset_id && occ.row_index === keep.row_index) continue;
-          const key = occ.dataset_id;
-          if (!planByDataset[key]) {
-            planByDataset[key] = {
-              dataset_id: occ.dataset_id,
-              row_indices: [],
-              id_column: cluster.id_column,
-              id_value: cluster.id_value,
-              related_dataset_id: keep.dataset_id,
-              related_row_index: keep.row_index,
-            };
-          }
-          planByDataset[key].row_indices.push(occ.row_index);
-        }
-      }
-      const archive_plan = Object.values(planByDataset);
-      const out = document.getElementById('analysis-output');
-      if (out) out.innerHTML = '<div class="loader"></div> Archiving duplicate rows...';
-      try {
-        const result = await api('/api/archive-duplicates', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ archive_plan }),
-        });
-        toast(`Archived ${result.total_archived} rows`, 'success');
-        // Re-render with summary of what was archived
-        const summaryHtml = result.datasets_affected.map(d => `
-          <div class="issue info">
-            <strong>${escapeHtml(d.filename)}</strong>: archived ${d.archived_count} rows
-            <div style="font-size: 11px; color: var(--muted); margin-top: 4px;">
-              v${d.from_version} → v${d.to_version} · ${d.remaining_rows} rows remaining
-            </div>
-          </div>
-        `).join('');
-        out.innerHTML = `
-          <div class="stat-grid">
-            <div class="stat success"><div class="label">Rows Archived</div><div class="value">${result.total_archived}</div></div>
-            <div class="stat"><div class="label">Datasets Affected</div><div class="value">${result.datasets_affected.length}</div></div>
-            <div class="stat"><div class="label">Status</div><div class="value" style="font-size: 14px;">Archived (recoverable)</div></div>
-            <div class="stat"><div class="label">Audit</div><div class="value" style="font-size: 11px;">Logged in catalog</div></div>
-          </div>
-          <div class="section">
-            <h3>✅ Archive Complete</h3>
-            <div class="review-banner" style="border-left-color: var(--success);">
-              Duplicate rows have been removed from the active datasets and saved to the archive table.
-              They can be restored later from the catalog if needed. Each dataset has a new immutable version on disk.
-            </div>
-            ${summaryHtml}
-          </div>
-        `;
-        refreshDatasets();
-      } catch (e) {
-        if (out) out.innerHTML = '';
-        toast(e.message, 'error');
-      }
-    }
-
-        let _cfdLastResult = null;
-
-    function renderCrossFileDedup(r) {
-      _cfdLastResult = r;
-      const s = r.summary || {};
-      const reasonHtml = r.reason
-        ? `<div class="review-banner">${escapeHtml(r.reason)}</div>` : '';
-
-      // Per-dataset detection summary
-      const datasetCards = (r.datasets || []).map(d => {
-        const detected = (d.detected_id_columns || []).map(c =>
-          `<span style="font-size: 11px; padding: 2px 8px; background: rgba(56,212,168,0.1); color: var(--success); border-radius: 10px; margin-right: 4px;">${escapeHtml(c.column)} (${c.confidence})</span>`
-        ).join('') || '<span style="color: var(--muted); font-size: 11px;">no identifier columns detected</span>';
-        return `
-          <div class="issue info">
-            <strong>${escapeHtml(d.name)}</strong> <span style="color: var(--muted); font-size: 11px;">— ${d.rows} rows</span>
-            <div style="margin-top: 6px;">Detected IDs: ${detected}</div>
-          </div>
-        `;
-      }).join('');
-
-      // Cluster cards
-      const clusterCards = (r.duplicate_clusters || []).map(c => {
-        const keep = c.recommended_keep || {};
-        const occHtml = c.occurrences.map(o => {
-          const isKept = o.dataset_id === keep.dataset_id && o.row_index === keep.row_index;
-          const badge = isKept
-            ? '<span style="color: var(--success); font-weight: 700; font-size: 11px;">← KEEP</span>'
-            : '<span style="color: var(--danger); font-size: 11px;">→ archive</span>';
-          const dataPreview = Object.entries(o.row_data).slice(0, 6).map(([k, v]) =>
-            `<span style="margin-right: 10px;"><strong style="color: var(--muted); font-size: 11px;">${escapeHtml(k)}:</strong> ${escapeHtml(String(v))}</span>`
-          ).join('');
-          return `
-            <div style="padding: 8px; margin-top: 6px; background: rgba(255,255,255,0.02); border-left: 2px solid ${isKept ? 'var(--success)' : 'var(--danger)'}; border-radius: 4px;">
-              <div style="display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-bottom: 4px;">
-                <span><strong style="color: var(--accent);">${escapeHtml(o.dataset_name)}</strong> · row ${o.row_index} · completeness ${(o.completeness_score * 100).toFixed(0)}%</span>
-                ${badge}
-              </div>
-              <div style="font-size: 12px;">${dataPreview}</div>
-            </div>
-          `;
-        }).join('');
-        return `
-          <div class="match-card high" style="margin-bottom: 14px;">
-            <div class="header">
-              <span>DUPLICATE — ${escapeHtml(c.id_column)} = ${escapeHtml(c.id_value)}</span>
-              <span class="prob">${c.occurrences.length} copies</span>
-            </div>
-            ${occHtml}
-          </div>
-        `;
-      }).join('');
-
-      document.getElementById('analysis-output').innerHTML = `
-        <div class="stat-grid">
-          <div class="stat success"><div class="label">Duplicate Clusters</div><div class="value">${s.total_clusters || 0}</div></div>
-          <div class="stat warn"><div class="label">Duplicate Rows</div><div class="value">${s.total_duplicate_rows || 0}</div></div>
-          <div class="stat danger"><div class="label">Would Archive</div><div class="value">${s.rows_that_would_be_archived || 0}</div></div>
-          <div class="stat"><div class="label">ID Cols Used</div><div class="value" style="font-size: 12px;">${(r.id_columns_used || []).join(', ') || '(none)'}</div></div>
+    function renderAnalyzeResult(r) {
+      $('workspace-output').innerHTML = `
+        <h3 style="margin: 0 0 12px 0;">Profile Result</h3>
+        <div class="kpi-grid" style="grid-template-columns: repeat(4, 1fr);">
+          <div class="kpi accent"><div class="kpi-label">Rows</div><div class="kpi-value">${r.row_count}</div></div>
+          <div class="kpi accent"><div class="kpi-label">Columns</div><div class="kpi-value">${r.column_count}</div></div>
+          <div class="kpi warning"><div class="kpi-label">Alerts</div><div class="kpi-value">${(r.ydata_alerts || []).length}</div></div>
+          <div class="kpi success"><div class="kpi-label">Duplicates</div><div class="kpi-value">${r.quality_issues?.exact_duplicates?.count || 0}</div></div>
         </div>
-        <div class="section">
-          <h3>📁 Datasets Scanned</h3>
-          ${reasonHtml}
-          ${datasetCards}
-        </div>
-        ${clusterCards ? `
-          <div class="section">
-            <h3>🔁 Duplicate Clusters</h3>
-            <div style="display: flex; gap: 8px; margin-bottom: 14px; align-items: center;">
-              <button class="btn btn-success" onclick="archiveCrossFileDuplicates()">Archive ${s.rows_that_would_be_archived || 0} Duplicate Rows</button>
-              <span style="font-size: 12px; color: var(--muted);">
-                Recommended rows are removed from active datasets and saved to the archive — recoverable, not deleted.
-              </span>
-            </div>
-            ${clusterCards}
-          </div>
-        ` : (s.total_clusters === 0 && (r.id_columns_used || []).length > 0 ? `
-          <div class="section">
-            <h3>✓ No Duplicates Detected</h3>
-            <div class="review-banner" style="border-left-color: var(--success);">
-              The selected datasets were scanned successfully and no duplicate rows were found.
-              Identifier columns used: <strong>${(r.id_columns_used || []).map(c => escapeHtml(c)).join(', ')}</strong>.
-              <br><br>
-              This typically means one of:
-              <ul style="margin: 8px 0 0 20px; padding: 0; color: var(--muted); font-size: 13px;">
-                <li>The files genuinely contain different records (no overlap)</li>
-                <li>Previous dedup operations already archived the duplicates — check Archived Rows in the catalog</li>
-                <li>The identifier columns have no matching values across files</li>
-              </ul>
-            </div>
-          </div>
-        ` : '')}
+        <h3 style="margin: 16px 0 8px 0;">Quality Alerts</h3>
+        ${(r.ydata_alerts || []).map(a => `<div style="padding: 8px; margin-bottom: 4px; background: var(--warning-soft); border-left: 3px solid var(--warning); border-radius: 4px; font-size: 13px;">${escapeHtml(a)}</div>`).join('') || '<div style="color: var(--text-muted); font-size: 13px;">No alerts.</div>'}
       `;
     }
 
-        function openEntityResolutionDialog() {
-      if (!state.activeDataset) {
-        toast('Pick a dataset first', 'error');
-        return;
-      }
-      const selA = document.getElementById('er-source-a');
-      const selB = document.getElementById('er-source-b');
-      selA.innerHTML = '';
-      selB.innerHTML = '<option value="">— None (dedup within A) —</option>';
-      for (const d of state.datasets) {
-        const filename = (d.filename || d.source.split('/').pop());
-        const meta = `${d.rows} rows`;
-        const opt = document.createElement('option');
-        opt.value = d.dataset_id;
-        opt.textContent = `${filename} (${meta})`;
-        if (d.dataset_id === state.activeDataset) opt.selected = true;
-        selA.appendChild(opt);
-
-        const opt2 = opt.cloneNode(true);
-        opt2.selected = false;
-        selB.appendChild(opt2);
-      }
-      document.getElementById('er-modal').classList.add('open');
-    }
-
-    function closeEntityResolutionDialog() {
-      document.getElementById('er-modal').classList.remove('open');
-    }
-
-    async function runEntityResolution() {
-      const a = document.getElementById('er-source-a').value;
-      const b = document.getElementById('er-source-b').value;
-      const strictness = document.getElementById('er-strictness').value;
-      const threshold = strictness === 'strict' ? 0.85
-                       : strictness === 'loose' ? 0.3
-                       : 0.5;
-      if (!a) { toast('Pick Source A', 'error'); return; }
-      if (b && b === a) { toast('Source A and B must differ', 'error'); return; }
-      closeEntityResolutionDialog();
-
-      const out = document.getElementById('analysis-output');
-      if (out) out.innerHTML = '<div class="loader"></div> Resolving entities... (Splink is matching records)';
-      try {
-        const payload = { dataset_id_a: a, match_threshold: threshold };
-        if (b) payload.dataset_id_b = b;
-        const result = await api('/api/resolve-entities', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-        renderEntityResolution(result);
-        toast(`Found ${result.summary.total} candidate matches`, 'success');
-      } catch (e) {
-        if (out) out.innerHTML = '';
-        toast(e.message, 'error');
-      }
-    }
-
-    // Store latest entity resolution result so toggles can re-render without re-running
-    let _erLastResult = null;
-    let _erShowMedium = false;
-    let _erShowLow = false;
-
-    function renderEntityResolution(r) {
-      _erLastResult = r;
-      _erShowMedium = false;
-      _erShowLow = false;
-      _renderEntityResolutionView();
-    }
-
-    function _renderEntityResolutionView() {
-      const r = _erLastResult;
-      if (!r) return;
-      const s = r.summary || {};
-      const modeLabel = r.mode === 'link_across' ? 'Cross-source linking' : 'Within-source deduplication';
-      const reasonHtml = r.reason
-        ? `<div class="review-banner">${escapeHtml(r.reason)}</div>` : '';
-
-      // Filter matches by which tiers are visible
-      const allMatches = r.matches || [];
-      const visible = allMatches.filter(m =>
-        m.confidence === 'high'
-        || (m.confidence === 'medium' && _erShowMedium)
-        || (m.confidence === 'low' && _erShowLow)
-      );
-
-      // Group matches by left-side entity (one row per left person, candidates underneath)
-      const groups = {};
-      for (const m of visible) {
-        const key = m.left_id + '|' + JSON.stringify(m.left_values);
-        if (!groups[key]) {
-          groups[key] = { left_values: m.left_values, candidates: [] };
-        }
-        groups[key].candidates.push(m);
-      }
-
-      const groupCards = Object.values(groups).map(g => {
-        const leftHtml = Object.entries(g.left_values).map(([k, v]) =>
-          `<span style="margin-right: 12px;"><strong style="color: var(--muted); font-size: 11px;">${escapeHtml(k)}:</strong> ${escapeHtml(v)}</span>`
-        ).join('');
-
-        const candidateRows = g.candidates.map(m => {
-          const sigPills = Object.entries(m.signals || {}).map(([k, v]) => {
-            const isMatch = String(v).includes('exact_match') || String(v).includes('strong_match');
-            const color = isMatch ? 'var(--success)' : 'var(--muted)';
-            return `<span style="color: ${color}; font-size: 11px; margin-right: 8px;">${escapeHtml(k)}: ${escapeHtml(v)}</span>`;
-          }).join('');
-          const rightHtml = Object.entries(m.right_values).map(([k, v]) =>
-            `<span style="margin-right: 12px;"><strong style="color: var(--muted); font-size: 11px;">${escapeHtml(k)}:</strong> ${escapeHtml(v)}</span>`
-          ).join('');
-          return `
-            <div class="match-card ${m.confidence}" style="margin-left: 24px; margin-top: 6px;">
-              <div class="header">
-                <span>↳ ${m.confidence.toUpperCase()}</span>
-                <span class="prob">${(m.match_probability * 100).toFixed(1)}%</span>
-              </div>
-              <div style="font-size: 13px;">${rightHtml}</div>
-              <div style="margin-top: 6px;">${sigPills}</div>
-            </div>
-          `;
-        }).join('');
-
-        return `
-          <div style="margin-bottom: 20px; padding: 12px; background: rgba(255,255,255,0.02); border-radius: 8px; border: 1px solid var(--border);">
-            <div style="font-size: 13px; margin-bottom: 4px;"><strong style="color: var(--accent);">Source A row</strong></div>
-            <div style="font-size: 13px; margin-bottom: 8px;">${leftHtml}</div>
-            <div style="font-size: 11px; color: var(--muted); margin-bottom: 6px;">${g.candidates.length} candidate ${g.candidates.length === 1 ? 'match' : 'matches'} in Source B:</div>
-            ${candidateRows}
-          </div>
-        `;
-      }).join('');
-
-      // Toggles for medium/low visibility
-      const mediumBtnLabel = _erShowMedium ? 'Hide medium' : `Show medium (${s.medium || 0})`;
-      const lowBtnLabel = _erShowLow ? 'Hide low' : `Show low (${s.low || 0})`;
-
-      document.getElementById('analysis-output').innerHTML = `
-        <div class="stat-grid">
-          <div class="stat success"><div class="label">Total Candidates</div><div class="value">${s.total || 0}</div></div>
-          <div class="stat success"><div class="label">High (multi-signal)</div><div class="value">${s.high || 0}</div></div>
-          <div class="stat warn"><div class="label">Medium (review)</div><div class="value">${s.medium || 0}</div></div>
-          <div class="stat"><div class="label">Low</div><div class="value">${s.low || 0}</div></div>
-        </div>
-        <div class="section">
-          <h3>🔗 ${modeLabel}</h3>
-          ${reasonHtml}
-          <div style="font-size: 12px; color: var(--muted); margin-bottom: 12px;">
-            Matched on signals: ${(r.shared_signals || r.match_columns || []).map(c => `<code>${escapeHtml(c)}</code>`).join(', ') || '(none)'}
-            &nbsp;•&nbsp; Evaluated ${r.candidate_pairs_evaluated || '?'} candidate pairs
-          </div>
-          <div style="margin-bottom: 16px; display: flex; gap: 8px;">
-            <button class="btn btn-secondary" onclick="_erToggleMedium()" style="padding: 6px 12px; font-size: 12px;">${mediumBtnLabel}</button>
-            <button class="btn btn-secondary" onclick="_erToggleLow()" style="padding: 6px 12px; font-size: 12px;">${lowBtnLabel}</button>
-          </div>
-          ${groupCards || `<div class="empty-state"><p>No ${_erShowMedium || _erShowLow ? 'matches' : 'high-confidence matches'} at this threshold. Try lowering the threshold or showing medium-confidence candidates.</p></div>`}
+    function renderRemediateResult(r) {
+      $('workspace-output').innerHTML = `
+        <h3 style="margin: 0 0 12px 0;">Fixes Applied</h3>
+        <div class="kpi-grid" style="grid-template-columns: repeat(3, 1fr);">
+          <div class="kpi success"><div class="kpi-label">Fixes</div><div class="kpi-value">${r.total_changes}</div></div>
+          <div class="kpi warning"><div class="kpi-label">Failures</div><div class="kpi-value">${r.total_failures}</div></div>
+          <div class="kpi neutral"><div class="kpi-label">Columns Cleaned</div><div class="kpi-value">${Object.keys(r.change_log || {}).length}</div></div>
         </div>
       `;
-    }
-
-    function _erToggleMedium() { _erShowMedium = !_erShowMedium; _renderEntityResolutionView(); }
-    function _erToggleLow() { _erShowLow = !_erShowLow; _renderEntityResolutionView(); }
-
-        async function viewArchivedRows() {
-      if (!state.activeDataset) {
-        toast('Pick a dataset first', 'error');
-        return;
-      }
-      const out = document.getElementById('analysis-output');
-      if (out) out.innerHTML = '<div class="loader"></div> Loading archived rows...';
-      try {
-        const result = await api(`/api/datasets/${state.activeDataset}/archived-rows`);
-        renderArchivedRows(result);
-      } catch (e) {
-        if (out) out.innerHTML = '';
-        toast(e.message, 'error');
-      }
     }
 
     function renderArchivedRows(r) {
       if (!r.count) {
-        document.getElementById('analysis-output').innerHTML = `
-          <div class="section">
-            <h3>📦 Archived Rows</h3>
-            <div class="review-banner" style="border-left-color: var(--accent);">
-              No rows have been archived from this dataset.
-              <br><br>
-              <span style="font-size: 12px; color: var(--muted);">
-                Rows are archived when cross-file deduplication finds duplicates and the user confirms removal.
-                Archived rows are kept here permanently — recoverable, never deleted.
-              </span>
-            </div>
-          </div>
-        `;
+        $('workspace-output').innerHTML = `<div class="empty-state"><h3>No archived rows</h3><p>Rows archived from this source will appear here.</p></div>`;
         return;
       }
-
-      const rowsHtml = r.archived_rows.map(row => {
-        const dataPreview = Object.entries(row.row_data || {}).slice(0, 8).map(([k, v]) =>
-          `<span style="margin-right: 12px;"><strong style="color: var(--muted); font-size: 11px;">${escapeHtml(k)}:</strong> ${escapeHtml(String(v))}</span>`
-        ).join('');
-        const archivedAt = new Date(row.archived_at).toLocaleString();
-        const reasonLabel = row.id_column && row.id_value
-          ? `Duplicate of ${row.id_column}=${row.id_value}`
-          : (row.reason || 'archived');
-        return `
-          <div style="padding: 12px; margin-bottom: 8px; background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-left: 3px solid var(--warning); border-radius: 6px;">
-            <div style="display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-bottom: 6px;">
-              <span>Row index ${row.original_row_index} · archived ${archivedAt}</span>
-              <span style="color: var(--warning);">${escapeHtml(reasonLabel)}</span>
+      $('workspace-output').innerHTML = `
+        <h3 style="margin: 0 0 12px 0;">${r.count} archived row(s)</h3>
+        ${r.archived_rows.map(row => `
+          <div style="padding: 10px; margin-bottom: 6px; background: var(--warning-soft); border-left: 3px solid var(--warning); border-radius: 4px; font-size: 12px;">
+            <div style="color: var(--text-muted); font-size: 11px; margin-bottom: 4px;">
+              Row ${row.original_row_index} · archived ${new Date(row.archived_at).toLocaleString()} · ${escapeHtml(row.id_column || '')}=${escapeHtml(row.id_value || '')}
             </div>
-            <div style="font-size: 12px;">${dataPreview}</div>
+            <div>${Object.entries(row.row_data || {}).slice(0, 6).map(([k,v]) =>
+              `<span style="margin-right: 12px;"><strong>${escapeHtml(k)}:</strong> ${escapeHtml(v)}</span>`).join('')}</div>
           </div>
-        `;
+        `).join('')}`;
+    }
+
+    // ═════════════════════════════════════════════════════════════════════
+    //                   LINEAGE TAB
+    // ═════════════════════════════════════════════════════════════════════
+    async function refreshLineage() {
+      try {
+        const lin = await api('/api/platform/lineage');
+        const log = lin.log || [];
+        const tbody = $('lineage-table').querySelector('tbody');
+        if (!log.length) {
+          tbody.innerHTML = '<tr class="no-hover"><td colspan="7" style="text-align: center; color: var(--text-muted);">No ingestions yet.</td></tr>';
+          return;
+        }
+        tbody.innerHTML = log.map(r => {
+          const when = new Date(r.ingested_at).toLocaleString();
+          const fn = r.filename || r.dataset_id;
+          let notes;
+          try { notes = typeof r.notes === 'string' ? JSON.parse(r.notes) : (r.notes || {}); }
+          catch { notes = {}; }
+          const dup = (notes.duplicate_details || [])[0];
+          const dupDetail = dup
+            ? `Matched <code>${escapeHtml(dup.matched_pk)}</code>${dup.fields_enriched > 0 ? `, enriched: ${dup.enriched_columns.join(', ')}` : ''}`
+            : '—';
+          return `<tr class="no-hover">
+            <td style="color: var(--text-muted); font-size: 12px;">${escapeHtml(when)}</td>
+            <td><strong>${escapeHtml(fn)}</strong></td>
+            <td><span class="badge badge-accent">${escapeHtml(r.target_table)}</span></td>
+            <td>${r.rows_inserted > 0 ? `<span class="badge badge-success">+${r.rows_inserted}</span>` : '0'}</td>
+            <td>${r.rows_merged > 0 ? `<span class="badge badge-warning">${r.rows_merged}</span>` : '0'}</td>
+            <td>${r.fields_standardized > 0 ? `<span style="color: var(--success);">+${r.fields_standardized}</span>` : '—'}</td>
+            <td style="font-size: 12px; color: var(--text-muted);">${dupDetail}</td>
+          </tr>`;
+        }).join('');
+      } catch (e) {
+        toast('Failed to load lineage: ' + e.message, 'error');
+      }
+    }
+
+    // ═════════════════════════════════════════════════════════════════════
+    //                   UPLOAD MODAL + FLOW
+    // ═════════════════════════════════════════════════════════════════════
+    function openUploadModal() { $('upload-modal').classList.add('open'); }
+    function closeUploadModal() { $('upload-modal').classList.remove('open'); }
+
+    $('upload-zone').addEventListener('dragover', e => { e.preventDefault(); $('upload-zone').classList.add('dragover'); });
+    $('upload-zone').addEventListener('dragleave', () => $('upload-zone').classList.remove('dragover'));
+    $('upload-zone').addEventListener('drop', e => {
+      e.preventDefault();
+      $('upload-zone').classList.remove('dragover');
+      const f = e.dataTransfer.files[0];
+      if (f) uploadFile(f);
+    });
+    $('upload-file').addEventListener('change', e => {
+      const f = e.target.files[0];
+      if (f) uploadFile(f);
+    });
+
+    async function uploadFile(file) {
+      closeUploadModal();
+      toast(`Uploading <strong>${escapeHtml(file.name)}</strong>…`);
+      const fd = new FormData();
+      fd.append('file', file);
+      try {
+        const r = await fetch('/api/upload', { method: 'POST', body: fd });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || 'Upload failed');
+        // Show auto-pipeline result toast
+        const ap = data.auto_pipeline || { steps: [] };
+        const lines = [];
+        for (const s of ap.steps) {
+          if (s.step === 'profile' && s.status === 'ok') lines.push(`📊 Profiled (${s.alerts} alerts)`);
+          else if (s.step === 'standardize' && s.status === 'ok') lines.push(`🧹 Standardized ${s.fixes} field(s)`);
+          else if (s.step === 'ingest' && s.status === 'ok') {
+            const parts = [`+${s.rows_inserted} new`];
+            if (s.rows_duplicates_found > 0) parts.push(`<span style="color: var(--warning); font-weight: 600;">${s.rows_duplicates_found} duplicate(s)</span>`);
+            if (s.rows_enriched > 0) parts.push(`<span style="color: var(--success); font-weight: 600;">${s.fields_enriched_total} field(s) enriched</span>`);
+            lines.push(`🗄 → <strong>${s.target_entity}</strong>: ${parts.join(' · ')} (master: ${s.total_in_master})`);
+            if (s.duplicate_details && s.duplicate_details.length) {
+              const d = s.duplicate_details[0];
+              lines.push(`⚠ Matched master record <code>${escapeHtml(d.matched_pk)}</code>${d.fields_enriched > 0 ? ` — enriched: ${d.enriched_columns.join(', ')}` : ''}`);
+            }
+          } else if (s.step === 'ingest' && s.status === 'skipped') {
+            lines.push(`<span style="color: var(--text-muted);">Source not auto-routed — use Workspace to choose target.</span>`);
+          }
+        }
+        toast(`<strong>${escapeHtml(data.filename)}</strong> ingested<br><div style="margin-top: 6px; font-size: 12px; line-height: 1.7;">${lines.join('<br>')}</div>`, 'success');
+        // Auto-navigate to Master Data if ingestion succeeded
+        const ingest = ap.steps.find(s => s.step === 'ingest' && s.status === 'ok');
+        if (ingest) {
+          state.masterEntity = ingest.target_entity;
+          switchTab('master');
+        } else {
+          refreshDashboard();
+        }
+      } catch (e) {
+        toast(`Upload failed: ${escapeHtml(e.message)}`, 'error');
+      }
+    }
+
+
+    // ═════════════════════════════════════════════════════════════════════
+    //                   PROVENANCE DRAWER (Phase B)
+    // ═════════════════════════════════════════════════════════════════════
+    function closeProvenance() {
+      document.getElementById('provenance-drawer-backdrop').style.display = 'none';
+      document.getElementById('provenance-drawer').style.transform = 'translateX(100%)';
+    }
+
+    async function openProvenance(rowIdx) {
+      const row = state.lastMasterRows[rowIdx];
+      if (!row) return;
+      const entity = state.masterEntity;
+      const pkCol = {Customers:'customer_id', Vendors:'vendor_id', Products:'sku', Invoices:'invoice_no'}[entity];
+      const pkValue = row[pkCol] || '(no id)';
+
+      // Show drawer immediately with skeleton
+      document.getElementById('drawer-title').textContent = `${entity.slice(0,-1)} ${pkValue}`;
+      document.getElementById('provenance-drawer-backdrop').style.display = 'block';
+      document.getElementById('provenance-drawer').style.transform = 'translateX(0)';
+      document.getElementById('drawer-content').innerHTML = '<div class="empty-state"><div class="loader"></div><p>Loading provenance...</p></div>';
+
+      // Fetch lineage and find ingestions that mentioned this PK
+      let contributingIngestions = [];
+      let enrichedFields = new Set();
+      try {
+        const lin = await api('/api/platform/lineage?limit=200');
+        const log = lin.log || [];
+        for (const ev of log) {
+          if (ev.target_table !== entity) continue;
+          let notes;
+          try { notes = typeof ev.notes === 'string' ? JSON.parse(ev.notes) : (ev.notes || {}); }
+          catch { notes = {}; }
+          const dups = notes.duplicate_details || [];
+          const matched = dups.find(d => String(d.matched_pk) === String(pkValue));
+          if (matched) {
+            contributingIngestions.push({
+              when: ev.ingested_at,
+              source: ev.filename || ev.dataset_id,
+              action: matched.fields_enriched > 0 ? 'enriched' : 'confirmed',
+              enriched_columns: matched.enriched_columns || [],
+            });
+            (matched.enriched_columns || []).forEach(c => enrichedFields.add(c));
+          }
+        }
+        // Also count the original-insert source (source_dataset_id on the row)
+        if (row.source_dataset_id) {
+          contributingIngestions.push({
+            when: row.ingested_at || '',
+            source: row.source_dataset_id,
+            action: 'inserted',
+            enriched_columns: [],
+          });
+        }
+      } catch (e) {
+        console.warn('Failed to fetch lineage:', e);
+      }
+
+      // Sort ingestions chronologically (oldest first)
+      contributingIngestions.sort((a, b) => (a.when || '').localeCompare(b.when || ''));
+
+      renderProvenance(row, entity, pkValue, contributingIngestions, enrichedFields);
+    }
+
+    function renderProvenance(row, entity, pkValue, ingestions, enrichedFields) {
+      const mergedCount = row.merged_from_count || 1;
+      const banner = mergedCount > 1
+        ? `<div style="padding: 12px 14px; background: var(--success-soft); border-left: 3px solid var(--success); border-radius: 6px; margin-bottom: 16px; font-size: 13px;">
+             <strong>Consolidated from ${mergedCount} sources.</strong> This master record was assembled from multiple uploads — the platform deduplicated and enriched it automatically.
+           </div>`
+        : `<div style="padding: 12px 14px; background: var(--surface-2); border-left: 3px solid var(--border-strong); border-radius: 6px; margin-bottom: 16px; font-size: 13px;">
+             From a single source. No duplicates seen yet for this record.
+           </div>`;
+
+      // Group fields: business fields first, then lineage/system fields
+      const lineageCols = new Set(['source_dataset_id','source_row_index','ingested_at','last_updated','merged_from_count','confidence_score','archived_at']);
+      const businessFields = Object.entries(row).filter(([k]) => !lineageCols.has(k) && row[k] !== null && row[k] !== '');
+      const fieldRows = businessFields.map(([k, v]) => {
+        const isEnriched = enrichedFields.has(k);
+        const tag = isEnriched
+          ? '<span class="badge badge-success" style="margin-left: 6px;">enriched</span>'
+          : '';
+        return `<div style="padding: 8px 0; border-bottom: 1px solid var(--border);">
+          <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">${escapeHtml(k)}${tag}</div>
+          <div style="font-size: 14px; ${isEnriched ? 'color: var(--success); font-weight: 500;' : ''}">${escapeHtml(v)}</div>
+        </div>`;
       }).join('');
 
-      document.getElementById('analysis-output').innerHTML = `
-        <div class="stat-grid">
-          <div class="stat warn"><div class="label">Archived Rows</div><div class="value">${r.count}</div></div>
-          <div class="stat"><div class="label">Status</div><div class="value" style="font-size: 14px;">Recoverable</div></div>
-          <div class="stat"><div class="label">Storage</div><div class="value" style="font-size: 12px;">Catalog DB</div></div>
-          <div class="stat"><div class="label">Deletable</div><div class="value" style="font-size: 14px;">No</div></div>
-        </div>
-        <div class="section">
-          <h3>📦 Archived Rows (Recoverable)</h3>
-          <div class="review-banner" style="border-left-color: var(--success); margin-bottom: 12px;">
-            Every row removed from active data is preserved here with full original content,
-            timestamp, and reason. This is the audit trail enterprise clients require —
-            <strong>nothing is ever silently destroyed.</strong>
-          </div>
-          ${rowsHtml}
-        </div>
+      // Lineage timeline
+      const timeline = ingestions.length
+        ? ingestions.map((ev, i) => {
+            const when = ev.when ? new Date(ev.when).toLocaleString() : '—';
+            const actionBadge = {
+              inserted:  '<span class="badge badge-accent">inserted</span>',
+              enriched:  '<span class="badge badge-success">enriched</span>',
+              confirmed: '<span class="badge badge-neutral">confirmed</span>',
+            }[ev.action] || '';
+            const enrichDetail = (ev.enriched_columns && ev.enriched_columns.length)
+              ? `<div style="font-size: 11px; color: var(--success); margin-top: 4px;">Added: ${ev.enriched_columns.map(c => `<code>${escapeHtml(c)}</code>`).join(', ')}</div>`
+              : '';
+            return `<div style="padding: 10px 12px; margin-bottom: 6px; background: var(--surface-2); border-radius: 6px;">
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <strong style="font-size: 13px;">${escapeHtml(ev.source)}</strong>
+                ${actionBadge}
+              </div>
+              <div style="font-size: 11px; color: var(--text-muted); margin-top: 3px;">${escapeHtml(when)}</div>
+              ${enrichDetail}
+            </div>`;
+          }).join('')
+        : '<div style="font-size: 12px; color: var(--text-muted);">No lineage events tracked yet.</div>';
+
+      document.getElementById('drawer-content').innerHTML = `
+        ${banner}
+        <h3 style="margin: 0 0 8px 0; font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px;">Fields</h3>
+        ${fieldRows || '<div style="font-size: 12px; color: var(--text-muted);">No business fields populated.</div>'}
+        <h3 style="margin: 24px 0 8px 0; font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px;">Lineage Timeline</h3>
+        ${timeline}
       `;
     }
 
-        function toast(msg, type = 'info') {
-      const t = document.createElement('div');
-      t.className = `toast ${type}`;
-      t.textContent = msg;
-      document.body.appendChild(t);
-      setTimeout(() => t.remove(), 3500);
-    }
-
-    // Upload handlers
-    const uploadZone = document.getElementById('upload-zone');
-    const fileInput = document.getElementById('file-input');
-    uploadZone.addEventListener('click', () => fileInput.click());
-    uploadZone.addEventListener('dragover', e => { e.preventDefault(); uploadZone.classList.add('drag'); });
-    uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('drag'));
-    uploadZone.addEventListener('drop', e => {
-      e.preventDefault();
-      uploadZone.classList.remove('drag');
-      if (e.dataTransfer.files[0]) handleUpload(e.dataTransfer.files[0]);
+    // ═════════════════════════════════════════════════════════════════════
+    //                   BOOTSTRAP
+    // ═════════════════════════════════════════════════════════════════════
+    document.addEventListener('DOMContentLoaded', () => {
+      refreshDashboard();
     });
-    fileInput.addEventListener('change', () => {
-      if (fileInput.files[0]) handleUpload(fileInput.files[0]);
-    });
-
-    async function handleUpload(file) {
-      const form = new FormData();
-      form.append('file', file);
-      uploadZone.innerHTML = '<div class="loader"></div> Uploading...';
-      try {
-        const res = await fetch('/api/upload', { method: 'POST', body: form });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error);
-        toast(`Loaded ${data.rows} rows`, 'success');
-        await refreshDatasets();
-        selectDataset(data.dataset_id);
-      } catch (e) {
-        toast(e.message, 'error');
-      } finally {
-        uploadZone.innerHTML = `
-          <p><strong>Drop a file here</strong></p>
-          <p>or click to browse</p>
-          <p style="font-size: 11px; margin-top: 12px;">CSV, Excel, JSON, Parquet, TSV, PDF, PDF</p>
-          <input type="file" id="file-input" accept=".csv,.xlsx,.xls,.json,.parquet,.tsv,.pdf">
-        `;
-        // Reattach listener
-        document.getElementById('file-input').addEventListener('change', e => {
-          if (e.target.files[0]) handleUpload(e.target.files[0]);
-        });
-      }
-    }
-
-    // Initial load
-    fetch('/health').then(r => r.json()).then(h => {
-      document.getElementById('health').textContent = `Model: ${h.ollama_model}`;
-    }).catch(() => {
-      document.getElementById('health').textContent = 'Disconnected';
-    });
-    refreshDatasets();
   </script>
-
-  <div class="modal-backdrop" id="er-modal">
-    <div class="modal">
-      <h2>Resolve Entities Across Sources</h2>
-      <label>
-        Source A
-        <select id="er-source-a"></select>
-      </label>
-      <label>
-        Source B <span style="color: var(--muted)">(leave empty to dedup within Source A)</span>
-        <select id="er-source-b"><option value="">— None (dedup within A) —</option></select>
-      </label>
-      <label>
-        Matching strictness
-        <select id="er-strictness">
-          <option value="strict">Strict — only highly confident matches</option>
-          <option value="balanced" selected>Balanced — recommended default</option>
-          <option value="loose">Loose — show more candidates to review</option>
-        </select>
-      </label>
-      <div class="modal-actions">
-        <button class="btn btn-secondary" onclick="closeEntityResolutionDialog()">Cancel</button>
-        <button class="btn btn-success" onclick="runEntityResolution()">Run</button>
-      </div>
-    </div>
-  </div>
-
-  <div class="modal-backdrop" id="cfd-modal">
-    <div class="modal">
-      <h2>Find Duplicates Across Files</h2>
-      <div id="cfd-step-files">
-        <p style="color: var(--muted); font-size: 13px; margin-bottom: 12px;">
-          Step 1 — pick 2 or more files to scan.
-        </p>
-        <div id="cfd-dataset-list" style="max-height: 240px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; padding: 8px;"></div>
-        <div class="modal-actions">
-          <button class="btn btn-secondary" onclick="closeCrossFileDedupDialog()">Cancel</button>
-          <button class="btn btn-success" onclick="cfdScanForColumns()">Next — pick match column</button>
-        </div>
-      </div>
-      <div id="cfd-step-columns" style="display: none;">
-        <p style="color: var(--muted); font-size: 13px; margin-bottom: 8px;">
-          Step 2 — pick which column identifies a unique record.
-        </p>
-        <div class="review-banner" style="border-left-color: var(--warning); margin-bottom: 12px; font-size: 12px;">
-          ⚠ Don\'t use foreign keys like <code>customer_id</code>. They link tables, they don\'t identify duplicates.
-          Use the record\'s own primary key — invoice number, bill ID, SKU, etc.
-        </div>
-        <div id="cfd-column-list" style="max-height: 280px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; padding: 8px;"></div>
-        <div class="modal-actions">
-          <button class="btn btn-secondary" onclick="cfdBackToFiles()">Back</button>
-          <button class="btn btn-success" onclick="cfdRunWithSelectedColumns()">Find Duplicates</button>
-        </div>
-      </div>
-    </div>
-  </div>
 </body>
 </html>
