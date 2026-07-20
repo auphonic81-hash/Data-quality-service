@@ -68,6 +68,15 @@ class DataRemediator:
             (cleaned_dataframe, change_log)
         """
         cleaned = df.copy()
+        # Pre-pass: strip thousands-separator commas from numeric strings
+        # so downstream coercion (pandera) sees clean numbers
+        import re as _re
+        _num_with_comma = _re.compile(r"^\s*-?\d{1,3}(?:,\d{3})+(?:\.\d+)?\s*$")
+        for _col in cleaned.columns:
+            if cleaned[_col].dtype == object:
+                cleaned[_col] = cleaned[_col].apply(
+                    lambda v: v.replace(",", "") if isinstance(v, str) and _num_with_comma.match(v) else v
+                )
         change_log: dict[str, dict[str, Any]] = {}
 
         for col in cleaned.columns:
@@ -85,6 +94,10 @@ class DataRemediator:
             elif col_type == "name":
                 cleaned[col], log = self._standardize_names(cleaned[col])
                 change_log[col] = {"type": "name", **log}
+            elif col_type == "status":
+                cleaned[col], log = self._standardize_status(cleaned[col])
+                if log["changes"] > 0:
+                    change_log[col] = {"type": "status", **log}
             elif col_type == "text":
                 cleaned[col], log = self._clean_text(cleaned[col])
                 if log["changes"] > 0:
@@ -115,74 +128,90 @@ class DataRemediator:
 
     # ─── Type-specific cleaners ────────────────────────────────────────────
 
-    def _standardize_phones(
-        self, series: pd.Series, df: pd.DataFrame | None = None
-    ) -> tuple[pd.Series, dict[str, Any]]:
-        """Normalize phone numbers to E.164.
+    def _standardize_phones(self, series, full_df=None):
+        """Standardize phones using phonenumbers library (Google\'s).
 
-        When the parent DataFrame has a country/region column on the same row,
-        we use that to set the parser\'s default region per-row. Without it,
-        we fall back to the configured default (UAE).
+        Tries the row\'s Country column (if present), then a fallback list.
+        Format E.164. Any number that can\'t be parsed becomes a failure.
         """
-        before = series.copy()
-        changes = 0
-        failures = 0
+        import phonenumbers
+        from phonenumbers import NumberParseException
 
-        # Try to find a per-row region hint column in the DataFrame
-        region_col = None
-        if df is not None:
-            for col in df.columns:
-                if str(col).lower() in ("country", "region", "country_code", "iso_country"):
-                    region_col = col
+        COUNTRY_ALIASES = {
+            "uae":"AE","united arab emirates":"AE","u.a.e.":"AE","ae":"AE",
+            "saudi arabia":"SA","ksa":"SA","saudi":"SA","sa":"SA",
+            "germany":"DE","de":"DE","france":"FR","fr":"FR",
+            "usa":"US","united states":"US","us":"US",
+            "uk":"GB","united kingdom":"GB","gb":"GB","britain":"GB",
+            "japan":"JP","jp":"JP","spain":"ES","es":"ES",
+        }
+        TRY_ORDER = ["AE","SA","US","GB","DE","FR","JP","ES"]
+
+        def resolve(raw):
+            if not raw or not isinstance(raw, str): return None
+            return COUNTRY_ALIASES.get(raw.strip().lower())
+
+        # Find a country column in full_df
+        country_col = None
+        if full_df is not None:
+            for c in full_df.columns:
+                if c.lower() in ("country","country_code","country_name","nation"):
+                    country_col = c
                     break
 
-        def country_to_iso(value: Any) -> str | None:
-            if value is None or (isinstance(value, float) and pd.isna(value)):
-                return None
-            text = str(value).strip().upper()
-            if not text:
-                return None
-            # Already an ISO-2 code?
-            if len(text) == 2 and text.isalpha():
-                return text
-            # Common full-name mappings (extend as needed)
-            return COUNTRY_TO_ISO.get(text)
-
-        def fix_one(idx: Any, value: Any) -> Any:
-            nonlocal changes, failures
-            if pd.isna(value):
-                return value
-            text = str(value).strip()
-            if not text:
-                return value
-
-            # Pick region for this row
-            row_region = self.default_region  # fallback
-            if region_col is not None and df is not None:
-                iso = country_to_iso(df.at[idx, region_col]) if idx in df.index else None
-                if iso:
-                    row_region = iso
-
-            try:
-                parsed = phonenumbers.parse(text, row_region)
-                if phonenumbers.is_valid_number(parsed):
-                    formatted = phonenumbers.format_number(
-                        parsed, phonenumbers.PhoneNumberFormat.E164
-                    )
-                    if formatted != text:
-                        changes += 1
-                    return formatted
+        out = series.astype(object).copy()
+        changes = 0
+        failures = 0
+        for idx, val in series.items():
+            if val is None or (isinstance(val,float) and pd.isna(val)):
+                continue
+            s = str(val).strip()
+            if not s:
+                continue
+            candidates = []
+            if country_col is not None:
+                c = resolve(full_df.at[idx, country_col])
+                if c: candidates.append(c)
+            for c in TRY_ORDER:
+                if c not in candidates:
+                    candidates.append(c)
+            parsed = None
+            # If the value already starts with +, parse WITHOUT a region hint
+            # (the + tells phonenumbers it\'s already international format).
+            # Adding a region hint can cause double-prefix or wrong parsing.
+            if s.startswith("+"):
+                try:
+                    p = phonenumbers.parse(s, None)
+                    if phonenumbers.is_valid_number(p):
+                        parsed = p
+                except NumberParseException:
+                    pass
+            # Otherwise, try region candidates
+            if parsed is None:
+                for c in candidates:
+                    try:
+                        p = phonenumbers.parse(s, c)
+                        if phonenumbers.is_valid_number(p):
+                            parsed = p
+                            break
+                    except NumberParseException:
+                        continue
+            # Final fallback: try None region
+            if parsed is None:
+                try:
+                    p = phonenumbers.parse(s, None)
+                    if phonenumbers.is_valid_number(p):
+                        parsed = p
+                except NumberParseException:
+                    pass
+            if parsed is not None:
+                formatted = phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
+                if formatted != s:
+                    out.at[idx] = formatted
+                    changes += 1
+            else:
                 failures += 1
-                return value
-            except Exception:
-                failures += 1
-                return value
-
-        new_series = pd.Series(
-            [fix_one(i, v) for i, v in series.items()],
-            index=series.index, dtype=object,
-        )
-        return new_series, {"changes": changes, "failures": failures}
+        return out, {"changes": changes, "failures": failures}
 
 
     def _standardize_emails(self, series: pd.Series) -> tuple[pd.Series, dict[str, Any]]:
@@ -240,148 +269,30 @@ class DataRemediator:
             "failures": failures,
         }
 
-    def _standardize_names(self, series: pd.Series) -> tuple[pd.Series, dict[str, Any]]:
-        """Clean, standardize, and cluster similar names (Ahmed/Ahmd/Amed)."""
-        before = series.copy()
+    def _standardize_names(self, series, full_df=None):
+        """Title-case names, preserving common all-caps acronyms (NY, IT, CEO)."""
+        ACRONYMS = {"NY","LA","CA","UK","US","USA","UAE","EU","IT","HR","CEO","CFO","CTO","COO","VIP","R&D"}
+        def fix(v):
+            if v is None or (isinstance(v, float) and pd.isna(v)): return v
+            s = str(v).strip()
+            if not s: return v
+            if not (s.isupper() or s.islower()): return s
+            parts = []
+            for w in s.split():
+                if w.upper() in ACRONYMS:
+                    parts.append(w.upper())
+                else:
+                    parts.append(w.capitalize())
+            return " ".join(parts)
+        out = series.astype(object).copy()
+        changes = 0
+        for idx, v in series.items():
+            fixed = fix(v)
+            if fixed != v and not (isinstance(v,float) and pd.isna(v)):
+                out.at[idx] = fixed
+                changes += 1
+        return out, {"changes": changes, "failures": 0}
 
-        # Step 1: basic cleaning
-        # Acronyms to preserve verbatim (uppercase)
-        ACRONYMS = {"IT", "HR", "USA", "UAE", "UK", "EU", "CEO", "CTO", "CFO",
-                    "VIP", "B2B", "B2C", "SQL", "API", "AI", "ML", "PR"}
-
-        # English conjunctions/articles/prepositions kept lowercase in titles
-        # ("Land of Toys Inc." stays correct, "Trucks and Buses" stays correct)
-        LOWERCASE_WORDS = {"and", "of", "the", "in", "for", "to", "a", "an",
-                           "on", "at", "by", "from", "with", "as", "or", "but"}
-
-        def cap_token(tok: str, is_first: bool) -> str:
-            """Normalize one token.
-
-            Rules:
-              - All-uppercase tokens stay uppercase (NY, EMEA, NYC, IT, AHMED).
-                If the user typed it in caps, they meant caps.
-              - Mixed-case tokens stay as-is (FunGiftIdeas, McDonald).
-              - All-lowercase or sentence-case gets title-cased.
-              - Conjunctions stay lowercase unless first word.
-              - Apostrophes and hyphens get proper capitalization.
-            """
-            stripped = re.sub(r"[^A-Za-z]", "", tok)
-            if not stripped:
-                return tok
-
-            # All-uppercase token → leave it alone (NY, EMEA, AHMED — user\'s choice)
-            if stripped.isupper():
-                return tok
-
-            # Mixed-case (Toys4GrownUps, FunGiftIdeas, McDonald) → leave it alone
-            has_lower = any(c.islower() for c in tok)
-            has_internal_upper = any(c.isupper() for c in tok[1:])
-            if has_lower and has_internal_upper:
-                return tok
-
-            # Conjunctions / articles / prepositions: lowercase, except if first word
-            if not is_first and stripped.lower() in LOWERCASE_WORDS:
-                return tok.lower()
-
-            # Apostrophes: capitalize letters after them (O\'Hara, D\'Angelo)
-            if "\'" in tok or "\u2019" in tok:
-                parts = re.split(r"([\'\u2019])", tok)
-                return "".join(
-                    p.capitalize() if i == 0 or (i >= 2 and parts[i-1] in ("\'", "\u2019")) else p
-                    for i, p in enumerate(parts)
-                )
-
-            # Hyphenated words: capitalize each segment (anne-marie → Anne-Marie)
-            if "-" in tok:
-                return "-".join(seg.capitalize() for seg in tok.split("-"))
-
-            return tok.capitalize()
-
-        def clean_one(value: Any) -> Any:
-            if pd.isna(value):
-                return value
-            text = str(value).strip()
-            text = re.sub(r"\s+", " ", text)
-            if re.search(r"[\u0600-\u06FF]", text):
-                return text  # Arabic — leave alone
-            tokens = text.split()
-            return " ".join(cap_token(tok, i == 0) for i, tok in enumerate(tokens))
-
-        cleaned = series.apply(clean_one)
-
-        # Step 2: smart fuzzy clustering with token-level logic
-        # Only merge names where structure matches (same last name, similar first name)
-        non_null = cleaned.dropna().astype(str)
-        unique_values = non_null.value_counts()
-        value_list = unique_values.index.tolist()
-        replacement_map: dict[str, str] = {}
-
-        def name_parts(name: str) -> tuple[str, str]:
-            """Split into (first_token, rest). Returns lowercase for comparison."""
-            tokens = name.lower().split()
-            if not tokens:
-                return ("", "")
-            if len(tokens) == 1:
-                return (tokens[0], "")
-            return (tokens[0], " ".join(tokens[1:]))
-
-        def safe_to_merge(a: str, b: str) -> bool:
-            """Only merge if ALL tokens have high similarity individually."""
-            a_tokens = a.lower().split()
-            b_tokens = b.lower().split()
-            if len(a_tokens) != len(b_tokens):
-                return False
-            # Each corresponding token must be >= 82% similar
-            for ta, tb in zip(a_tokens, b_tokens):
-                if fuzz.ratio(ta, tb) < 82:
-                    return False
-            # And the overall string must still be >= 80% similar
-            return fuzz.ratio(a.lower(), b.lower()) >= 80
-
-        # Frequency-aware clustering — prevents Austria/Australia type errors.
-        # Rule: only merge variants when one is clearly rare (likely a typo) and
-        # the other is common (the established form). Two values that both appear
-        # frequently are treated as genuine distinct entries, even if similar.
-        for value in value_list:
-            if value in replacement_map:
-                continue
-            candidates = process.extract(value, value_list, scorer=fuzz.ratio, limit=20)
-            cluster = [value]
-            for candidate, _, _ in candidates:
-                if candidate == value or candidate in replacement_map:
-                    continue
-                if not safe_to_merge(value, candidate):
-                    continue
-                # Frequency check: one must be clearly rare relative to the other.
-                # Both established → assume distinct (Austria vs Australia, Ann vs Anna).
-                count_value = unique_values.get(value, 0)
-                count_candidate = unique_values.get(candidate, 0)
-                rare = min(count_value, count_candidate)
-                common = max(count_value, count_candidate)
-                if common < 3:
-                    # Both rare — can\'t tell which is the typo. Skip.
-                    continue
-                if rare / common >= 0.4:
-                    # Both are well-established in the data — likely distinct values
-                    continue
-                cluster.append(candidate)
-
-            if len(cluster) > 1:
-                canonical = max(cluster, key=lambda v: (len(v), unique_values.get(v, 0)))
-                for variant in cluster:
-                    if variant != canonical:
-                        replacement_map[variant] = canonical
-
-        clusters_applied = len(replacement_map)
-        new_series = cleaned.replace(replacement_map)
-
-        changed = (before.fillna("").astype(str) != new_series.fillna("").astype(str)).sum()
-
-        return new_series, {
-            "changes": int(changed),
-            "failures": 0,
-            "clusters_merged": clusters_applied,
-        }
 
     def _clean_text(self, series: pd.Series) -> tuple[pd.Series, dict[str, Any]]:
         """Strip whitespace, normalize internal spaces."""
@@ -402,6 +313,48 @@ class DataRemediator:
 
     # ─── Auto-detection ────────────────────────────────────────────────────
 
+    STATUS_CODE_MAP = {
+        # Employee
+        "ACT": "Active", "INA": "Inactive", "TRM": "Terminated",
+        "LOA": "On Leave", "PND": "Pending",
+        # Invoice
+        "PAID": "Paid", "UNPAID": "Unpaid", "OVD": "Overdue",
+        "DUE": "Pending", "CNL": "Cancelled", "CANCELLED": "Cancelled",
+        # Generic short forms
+        "A": "Active", "I": "Inactive", "P": "Paid", "U": "Unpaid",
+        "Y": "Active", "N": "Inactive",
+    }
+
+    def _standardize_status(self, series):
+        """Translate status codes to readable labels and enforce Title case.
+        
+        Two-pass normalization:
+        1. Look up known short codes in STATUS_CODE_MAP (ACT->Active, PAID->Paid)
+        2. Title-case ALL values so 'active'/'ACTIVE'/'Active' all become 'Active'
+        
+        Semantic translation (e.g. invoice Active->Open) happens later in
+        master_repository, where entity context is known.
+        """
+        out = series.astype(object).copy()
+        changes = 0
+        for idx, val in series.items():
+            if val is None or (isinstance(val, float) and pd.isna(val)):
+                continue
+            s = str(val).strip()
+            if not s:
+                out.at[idx] = "Unknown"
+                changes += 1
+                continue
+            # Pass 1: short code translation
+            mapped = self.STATUS_CODE_MAP.get(s.upper(), s)
+            # Pass 2: enforce Title case for any multi-word or single-word value
+            # "On Leave" stays "On Leave", "active" -> "Active", "ACTIVE" -> "Active"
+            normalized = " ".join(w.capitalize() for w in mapped.split())
+            if normalized != s:
+                out.at[idx] = normalized
+                changes += 1
+        return out, {"changes": changes}
+
     @staticmethod
     def _auto_detect_type(series: pd.Series) -> str:
         """Heuristically detect the type of a column for remediation.
@@ -420,6 +373,8 @@ class DataRemediator:
             return "phone"
         if any(t in name for t in ("name", "title", "owner", "contact", "person")):
             return "name"
+        if any(t in name for t in ("status", "state", "status_code", "status_cd")):
+            return "status"
 
         sample = series.dropna().astype(str).head(50)
         if sample.empty:

@@ -1,9 +1,44 @@
+# Data directories (never commit runtime data)
+archive/
+aside/
+duplicates/
+backups/
+demo_materials/
+reports/
+uploads/
+raw_files_dir/
+
+# Backup files
+*.bak
+*.bak_*
+*.bak2
+*.bak3
+*.bak4
+*.bak5
+*.before_lib_swap
+*.broken*
+
+# Python
 __pycache__/
 *.pyc
-.env
-uploads/
-reports/
-cache/
-*.csv
-*.sqlite3
+*.pyo
+.pytest_cache/
+venv/
+.venv/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
 .DS_Store
+Thumbs.db
+
+# Logs
+*.log
+/tmp/*.log
+
+# SQLite databases (data, not code)
+*.sqlite3
+*.db

@@ -35,7 +35,7 @@ class DataIngestion:
             if ext == ".csv":
                 return DataIngestion._read_csv(path)
             if ext == ".tsv":
-                return pd.read_csv(path, sep="\t")
+                return pd.read_csv(path, sep="\t", dtype=str, keep_default_na=False)
             if ext in {".xlsx", ".xls"}:
                 return pd.read_excel(path)
             if ext == ".json":
@@ -54,7 +54,7 @@ class DataIngestion:
         if not path.exists():
             raise FileNotFoundError(f"Database not found: {path}")
 
-        with sqlite3.connect(path) as conn:
+        with sqlite3.connect(path, timeout=30) as conn:
             cursor = conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
                 (table,),
@@ -81,7 +81,7 @@ class DataIngestion:
         path = Path(db_path).resolve()
         if not path.exists():
             raise FileNotFoundError(f"Database not found: {path}")
-        with sqlite3.connect(path) as conn:
+        with sqlite3.connect(path, timeout=30) as conn:
             cursor = conn.execute(
                 "SELECT name FROM sqlite_master "
                 "WHERE type='table' AND name NOT LIKE 'sqlite_%' "
@@ -96,7 +96,9 @@ class DataIngestion:
         last_error: Exception | None = None
         for encoding in encodings:
             try:
-                return pd.read_csv(path, encoding=encoding)
+                # dtype=str + keep_default_na=False preserves leading +, leading zeros,
+                # mixed-format identifiers — pandas docs recommend this for unknown CSVs.
+                return pd.read_csv(path, encoding=encoding, dtype=str, keep_default_na=False)
             except UnicodeDecodeError as exc:
                 last_error = exc
                 continue

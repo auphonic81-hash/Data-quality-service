@@ -348,8 +348,10 @@
       <button data-tab="master">Master Data</button>
       <button data-tab="workspace">Workspace</button>
       <button data-tab="lineage">Lineage</button>
+      <button data-tab="match">🔍 Match Review</button>
     </nav>
     <div class="actions">
+      <button class="btn btn-ghost btn-sm" onclick="resetProject()" style="margin-right: 8px;" title="Wipe master data for a clean demo state">⟲ Reset</button>
       <button class="btn btn-primary" onclick="openUploadModal()">+ Connect Source</button>
     </div>
   </header>
@@ -371,9 +373,9 @@
     <section class="tab-content active" id="tab-dashboard">
       <div class="kpi-grid">
         <div class="kpi accent">
-          <div class="kpi-label">Connected Sources</div>
+          <div class="kpi-label">Distinct Source Systems</div>
           <div class="kpi-value" id="kpi-sources">—</div>
-          <div class="kpi-trend">Active data inputs</div>
+          <div class="kpi-trend">file, api, sqlite, pdf</div>
         </div>
         <div class="kpi success">
           <div class="kpi-label">Master Records</div>
@@ -392,9 +394,88 @@
         </div>
       </div>
 
+
+      <!-- ─── ASIDE FILES (Source System Layer) ─── -->
+      <div class="card" id="aside-files-card">
+        <h2>📁 Aside Files (Source System Layer — outside the database)</h2>
+        <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 12px;">
+          Unstructured docs (PDFs, letters, memos) stay aside on disk. They're NOT loaded
+          into the database — same as Informatica's source-system layer. PDFs enrich master records,
+          then the file remains in its directory.
+        </p>
+        <div id="aside-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;"></div>
+        <div id="aside-details" style="margin-top: 12px; font-size: 13px;"></div>
+      </div>
+
+      <!-- ─── SCHEMA ENHANCEMENT ─── -->
+      <div class="card" id="schema-enhancement-card">
+        <h2>⚙️ Schema Enhancement (Auto-Improved by the Platform)</h2>
+        <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 12px;">
+          The platform observes data flowing in and improves the schema automatically —
+          indexing high-traffic columns, refining column types, inferring constraints.
+        </p>
+        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;">
+          <div class="layer-card" data-se-section="indexes" style="padding: 12px; background: var(--accent-soft); border-radius: 6px; border-left: 3px solid var(--success); cursor: pointer;">
+            <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Indexes</div>
+            <div style="font-size: 18px; font-weight: 600; margin-top: 2px;">Auto-Indexed</div>
+            <div style="font-size: 28px; font-weight: 700; margin-top: 6px;" id="se-indexes-count">—</div>
+            <div style="font-size: 11px; color: var(--text-soft); margin-top: 4px;">indexes on high-traffic columns</div>
+          </div>
+          <div class="layer-card" data-se-section="types" style="padding: 12px; background: var(--accent-soft); border-radius: 6px; border-left: 3px solid var(--warning); cursor: pointer;">
+            <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Types</div>
+            <div style="font-size: 18px; font-weight: 600; margin-top: 2px;">Columns Re-Typed</div>
+            <div style="font-size: 28px; font-weight: 700; margin-top: 6px;" id="se-types-count">—</div>
+            <div style="font-size: 11px; color: var(--text-soft); margin-top: 4px;">TEXT → EMAIL / PHONE / DATE / NUMERIC</div>
+          </div>
+          <div class="layer-card" data-se-section="constraints" style="padding: 12px; background: var(--accent-soft); border-radius: 6px; border-left: 3px solid var(--accent); cursor: pointer;">
+            <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Constraints</div>
+            <div style="font-size: 18px; font-weight: 600; margin-top: 2px;">Inferred</div>
+            <div style="font-size: 28px; font-weight: 700; margin-top: 6px;" id="se-constraints-count">—</div>
+            <div style="font-size: 11px; color: var(--text-soft); margin-top: 4px;">NOT NULL / UNIQUE proposals</div>
+          </div>
+        </div>
+        <div id="se-details" style="margin-top: 12px; font-size: 13px;"></div>
+      </div>
+
+      <!-- ─── 3-LAYER DATABASE ARCHITECTURE (hidden in entity-only view) ─── -->
+      <div class="card" style="display:none" style="margin-top: 16px;">
+        <h2>🏛️ Database Architecture (Informatica-Style Layered)</h2>
+        <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 12px;">
+          Every source becomes a real table in the database. Wide tables get normalized.
+          Cross-source merging produces golden master records.
+        </p>
+        <div id="layer-grid" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;">
+          <div class="layer-card" data-layer="landing" style="padding: 12px; background: var(--accent-soft); border-radius: 6px; border-left: 3px solid var(--accent); cursor: pointer;">
+            <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Layer 1</div>
+            <div style="font-size: 18px; font-weight: 600; margin-top: 2px;">Landing</div>
+            <div style="font-size: 28px; font-weight: 700; margin-top: 6px;" id="layer-landing-count">—</div>
+            <div style="font-size: 11px; color: var(--text-soft); margin-top: 4px;">tables (raw source data)</div>
+          </div>
+          <div class="layer-card" data-layer="staging" style="padding: 12px; background: var(--accent-soft); border-radius: 6px; border-left: 3px solid var(--accent-strong, #3b82f6); cursor: pointer;">
+            <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Layer 2</div>
+            <div style="font-size: 18px; font-weight: 600; margin-top: 2px;">Staging</div>
+            <div style="font-size: 28px; font-weight: 700; margin-top: 6px;" id="layer-staging-count">—</div>
+            <div style="font-size: 11px; color: var(--text-soft); margin-top: 4px;">tables (cleansed per source×entity)</div>
+          </div>
+          <div class="layer-card" data-layer="normalized" style="padding: 12px; background: var(--accent-soft); border-radius: 6px; border-left: 3px solid var(--warning); cursor: pointer;">
+            <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Layer 3</div>
+            <div style="font-size: 18px; font-weight: 600; margin-top: 2px;">Normalized</div>
+            <div style="font-size: 28px; font-weight: 700; margin-top: 6px;" id="layer-normalized-count">—</div>
+            <div style="font-size: 11px; color: var(--text-soft); margin-top: 4px;">tables (FD-split children)</div>
+          </div>
+          <div class="layer-card" data-layer="master" style="padding: 12px; background: var(--accent-soft); border-radius: 6px; border-left: 3px solid var(--success); cursor: pointer;">
+            <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Layer 4</div>
+            <div style="font-size: 18px; font-weight: 600; margin-top: 2px;">Master</div>
+            <div style="font-size: 28px; font-weight: 700; margin-top: 6px;" id="layer-master-count">—</div>
+            <div style="font-size: 11px; color: var(--text-soft); margin-top: 4px;">tables (golden records)</div>
+          </div>
+        </div>
+        <div id="layer-details" style="margin-top: 12px; font-size: 13px;"></div>
+      </div>
       <div class="row-2-3">
         <div class="card">
-          <h2>📊 Master Data by Entity</h2>
+          <h2>📊 Entities Discovered From Your Data</h2>
+        <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 12px;">All business entities the platform auto-discovered, cleaned, deduplicated, and normalized.</p>
           <table id="entity-summary-table">
             <thead><tr><th>Entity</th><th>Records</th><th>Sources</th><th>Duplicates Resolved</th><th>Total Inputs</th></tr></thead>
             <tbody><tr class="no-hover"><td colspan="5" style="text-align: center; color: var(--text-muted);">Loading...</td></tr></tbody>
@@ -425,17 +506,46 @@
     <!-- ─── TAB: MASTER DATA ─── -->
     <section class="tab-content" id="tab-master">
       <div class="sub-nav" id="master-subnav">
-        <button class="active" data-entity="Customers">Customers</button>
-        <button data-entity="Vendors">Vendors</button>
-        <button data-entity="Invoices">Invoices</button>
-        <button data-entity="Products">Products</button>
+        <!-- Buttons populated dynamically by refreshMasterTabs() -->
       </div>
       <div class="card">
         <h2 id="master-title">Master Customers</h2>
+        <div style="margin-bottom: 12px;">
+          <input id="master-search" type="text" placeholder="Search this table..." 
+                 style="width: 100%; max-width: 400px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px;"
+                 oninput="clearTimeout(window.__mstf);window.__mstf=setTimeout(()=>refreshMaster(),300)"/>
+          <span id="master-search-count" style="margin-left: 12px; color: var(--text-muted); font-size: 13px;"></span>
+        </div>
         <table id="master-table">
           <thead><tr><td colspan="8" style="text-align: center; color: var(--text-muted);">Loading...</td></tr></thead>
           <tbody></tbody>
         </table>
+      </div>
+    </section>
+
+        <!-- ─── TAB: MATCH REVIEW ─── -->
+    <section class="tab-content" id="tab-match">
+      <div class="card">
+        <h2>🔍 Match Review — Probabilistic Duplicate Detection</h2>
+        <p style="color: var(--text-muted); font-size: 13px;">
+          Splink runs the Fellegi-Sunter probabilistic linkage between staging tables for each entity.
+          Pairs scored above the threshold await steward review — same workflow as Informatica MDM\'s match queue.
+        </p>
+        <div style="margin: 12px 0;">
+          <label style="font-size: 13px; margin-right: 8px;">Entity:</label>
+          <select id="match-entity" onchange="loadMatchQueue()" style="padding: 4px 8px;">
+            <option value="Customers">Customers</option>
+            <option value="Employees">Employees</option>
+            <option value="Vendors">Vendors</option>
+            <option value="Invoices">Invoices</option>
+            <option value="Products">Products</option>
+          </select>
+          <label style="font-size: 13px; margin: 0 8px 0 16px;">Threshold:</label>
+          <input type="number" id="match-threshold" value="0.001" min="0" max="1" step="0.001" style="width: 80px; padding: 4px 8px;" onchange="loadMatchQueue()">
+          <button class="btn" onclick="loadMatchQueue()" style="margin-left: 12px;">Refresh</button>
+        </div>
+        <div id="match-summary" style="margin: 12px 0; font-size: 13px;"></div>
+        <div id="match-pairs" style="margin-top: 16px;"></div>
       </div>
     </section>
 
@@ -496,23 +606,87 @@
 
   </main>
 
-  <!-- ═══ UPLOAD MODAL ═══ -->
+  <!-- ═══ CONNECT SOURCES WIZARD ═══ -->
   <div class="modal-backdrop" id="upload-modal">
-    <div class="modal">
-      <h2>Connect a New Source</h2>
-      <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 16px;">
-        Drag a file or click to browse. Supported: CSV, Excel, JSON, Parquet, TSV, PDF.
-      </p>
-      <label class="upload-zone" id="upload-zone">
-        <input type="file" id="upload-file" accept=".csv,.xlsx,.xls,.json,.parquet,.tsv,.pdf">
-        <div style="font-size: 28px; margin-bottom: 8px;">📁</div>
-        <div style="font-weight: 600; margin-bottom: 4px;">Drop a file here or click to browse</div>
-        <div style="color: var(--text-muted); font-size: 12px;">The platform will auto-profile, standardize, and ingest into the right master entity.</div>
-      </label>
-      <div class="modal-actions">
-        <button class="btn btn-ghost" onclick="closeUploadModal()">Cancel</button>
+    <div class="modal" style="max-width: 760px; max-height: 90vh; overflow-y: auto;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <div>
+          <h2 style="margin: 0;">Connect Sources</h2>
+          <p style="color: var(--text-muted); font-size: 13px; margin: 4px 0 0 0;">
+            Pick sources to ingest. The platform auto-profiles, standardizes, and unifies into the master repository.
+          </p>
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="closeUploadModal()" style="font-size: 20px;">×</button>
+      </div>
+
+      <div class="sub-nav" style="margin-bottom: 16px;">
+        <button class="active" data-source="folder" onclick="switchSourceTab('folder')">📁 Local Folder</button>
+        <button data-source="sharepoint" onclick="switchSourceTab('sharepoint')">🗄 SharePoint</button>
+        <button data-source="excel" onclick="switchSourceTab('excel')">📊 Excel Reports</button>
+        <button data-source="database" onclick="switchSourceTab('database')">🗃 SQLite DB</button>
+        <button data-source="restapi" onclick="switchSourceTab('restapi')">🌐 REST API</button>
+      </div>
+
+      <div id="source-tab-folder" class="source-tab">
+        <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 10px;">
+          📁 <strong>Local Folder</strong> · /home/alsubaihi/demo_sources/local_folder
+        </div>
+        <div id="folder-items" style="border: 1px solid var(--border); border-radius: 6px; padding: 8px; max-height: 260px; overflow-y: auto;">
+          <div style="color: var(--text-muted); padding: 20px; text-align: center;">Loading files...</div>
+        </div>
+      </div>
+
+      <div id="source-tab-sharepoint" class="source-tab" style="display:none;">
+        <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 10px;">
+          🗄 <strong>SharePoint - Finance Department</strong> · company.sharepoint.com
+        </div>
+        <div id="sharepoint-items" style="border: 1px solid var(--border); border-radius: 6px; padding: 8px; max-height: 260px; overflow-y: auto;">
+          <div style="color: var(--text-muted); padding: 20px; text-align: center;">Loading SharePoint library...</div>
+        </div>
+      </div>
+
+      
+      <div id="source-tab-excel" class="source-tab" style="display:none;">
+        <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 10px;">
+          📊 <strong>Excel Reports — Finance & Operations</strong> · shared network drive
+        </div>
+        <div id="excel-items" style="border: 1px solid var(--border); border-radius: 6px; padding: 8px; max-height: 260px; overflow-y: auto;">
+          <div style="color: var(--text-muted); padding: 20px; text-align: center;">Loading Excel files...</div>
+        </div>
+      </div>
+
+      
+      <div id="source-tab-restapi" class="source-tab" style="display:none;">
+        <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 10px;">
+          🌐 <strong>REST API — Mock HR System</strong> · live HTTP service
+        </div>
+        <div id="restapi-items" style="border: 1px solid var(--border); border-radius: 6px; padding: 8px; max-height: 260px; overflow-y: auto;">
+          <div style="color: var(--text-muted); padding: 20px; text-align: center;">Discovering API endpoints...</div>
+        </div>
+      </div>
+
+      <div id="source-tab-database" class="source-tab" style="display:none;">
+        <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 10px;">
+          🗃 <strong>SQLite Database</strong> · legacy_finance.sqlite (mimics ERP/SAP legacy DB)
+        </div>
+        <div id="database-items" style="border: 1px solid var(--border); border-radius: 6px; padding: 8px; max-height: 260px; overflow-y: auto;">
+          <div style="color: var(--text-muted); padding: 20px; text-align: center;">Loading tables...</div>
+        </div>
+      </div>
+
+      <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border);">
+        <div id="batch-progress" style="display: none; margin-bottom: 12px;"></div>
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <div id="selection-count" style="font-size: 13px; color: var(--text-muted);">0 selected</div>
+          <div>
+            <button class="btn btn-ghost" onclick="closeUploadModal()">Cancel</button>
+            <button class="btn btn-primary" onclick="runBatchIngest()" id="ingest-btn" disabled>Ingest Selected</button>
+          </div>
+        </div>
       </div>
     </div>
+  </div>
+
   </div>
 
   <script>
@@ -574,6 +748,7 @@
       $('breadcrumb-current').textContent = labels[name] || name;
       // Refresh data for the active tab
       if (name === 'dashboard') refreshDashboard();
+      if (name === 'match') loadMatchQueue();
       else if (name === 'master') refreshMaster();
       else if (name === 'workspace') refreshWorkspace();
       else if (name === 'lineage') refreshLineage();
@@ -585,6 +760,12 @@
     async function refreshDashboard() {
       try {
         const s = await api('/api/platform/summary');
+        // Source SYSTEMS (not files / not ingestion runs) — count distinct connectors
+        const SOURCE_SYSTEMS = [
+          'Local Folder', 'SharePoint Finance', 'Excel Reports',
+          'Legacy SQLite ERP', 'Mock HR REST API', 'Mock CRM REST API',
+          'Aside Letters'
+        ];
         $('kpi-sources').textContent = s.total_sources || 0;
         $('kpi-ingestions').textContent = s.total_ingestions || 0;
         let totalR = 0, totalM = 0;
@@ -602,6 +783,104 @@
         }
         $('kpi-records').textContent = totalR;
         $('kpi-merged').textContent = totalM;
+
+        // 1) Architecture (4-layer counts)
+        try {
+          const arch = await api('/api/platform/architecture');
+          $('layer-landing-count').textContent    = arch.layers.landing.count    || 0;
+          $('layer-staging-count').textContent    = arch.layers.staging.count    || 0;
+          $('layer-normalized-count').textContent = arch.layers.normalized.count || 0;
+          $('layer-master-count').textContent     = arch.layers.master.count     || 0;
+          window._architecture = arch;
+        } catch(_) {}
+
+        // 2) Schema enhancement
+        try {
+          const se = await api('/api/schema_enhancement');
+          $('se-indexes-count').textContent     = se.indexes.total || 0;
+          $('se-types-count').textContent       = se.column_type_refinements.total || 0;
+          $('se-constraints-count').textContent = se.constraints_inferred.total || 0;
+          window._se = se;
+          document.querySelectorAll('[data-se-section]').forEach(el => {
+            el.addEventListener('click', () => {
+              const sec = el.dataset.seSection;
+              const d = window._se;
+              if (!d) return;
+              let html = '';
+              if (sec === 'indexes') {
+                html = `<table style="width:100%;font-size:12px;"><thead><tr><th>Index Name</th><th>Table</th></tr></thead><tbody>` +
+                  d.indexes.sample.map(i => `<tr><td><code>${escapeHtml(i.name)}</code></td><td>${escapeHtml(i.table)}</td></tr>`).join('') +
+                  `</tbody></table><div style="text-align:center;color:var(--text-muted);font-size:11px;padding:4px;">Showing 20 of ${d.indexes.total} indexes</div>`;
+              } else if (sec === 'types') {
+                const byType = Object.entries(d.column_type_refinements.by_type||{}).map(([t,n])=>`<span class="badge">${t}: ${n}</span>`).join(' ');
+                html = `<div style="margin-bottom:8px;">${byType}</div><table style="width:100%;font-size:12px;"><thead><tr><th>Table.Column</th><th>Stored As</th><th>Actual Type</th><th>Confidence</th></tr></thead><tbody>` +
+                  d.column_type_refinements.sample.map(r=>`<tr><td><code>${escapeHtml(r.table)}.${escapeHtml(r.column)}</code></td><td>${escapeHtml(r.stored_as)}</td><td><strong>${escapeHtml(r.actual_type)}</strong></td><td>${(r.confidence*100).toFixed(0)}%</td></tr>`).join('') +
+                  `</tbody></table>`;
+              } else if (sec === 'constraints') {
+                html = `<table style="width:100%;font-size:12px;"><thead><tr><th>Table.Column</th><th>Proposed</th><th>Non-Null Rate</th><th>Distinct Rate</th></tr></thead><tbody>` +
+                  d.constraints_inferred.sample.map(c=>`<tr><td><code>${escapeHtml(c.table)}.${escapeHtml(c.column)}</code></td><td><strong>${c.proposed_constraints.join(' + ')}</strong></td><td>${(c.non_null_rate*100).toFixed(1)}%</td><td>${(c.distinct_rate*100).toFixed(1)}%</td></tr>`).join('') +
+                  `</tbody></table>`;
+              }
+              $('se-details').innerHTML = `<div style="padding:12px;background:var(--surface-2);border-radius:6px;margin-top:8px;">${html}</div>`;
+            });
+          });
+        } catch(_) {}
+
+        // 3) Aside files
+        try {
+          const aside = await api('/api/platform/aside_files');
+          const grid = $('aside-grid');
+          grid.innerHTML = aside.sections.map(s => {
+            const isQuarantine = s.section_type === 'quarantine';
+            const tagColor = isQuarantine ? 'var(--warning, #c2410c)' : 'var(--text-muted)';
+            const tagBg    = isQuarantine ? 'rgba(245, 158, 11, 0.08)' : 'var(--accent-soft)';
+            const tagLabel = isQuarantine ? 'QUARANTINE' : 'Source System';
+            return `
+              <div class="layer-card" data-aside-label="${s.label}" style="padding: 12px; background: ${tagBg}; border-radius: 6px; border-left: 3px solid ${tagColor}; cursor: pointer;">
+                <div style="font-size: 11px; color: ${tagColor}; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;">${tagLabel}</div>
+                <div style="font-size: 16px; font-weight: 600; margin-top: 2px;">${s.label}</div>
+                <div style="font-size: 24px; font-weight: 700; margin-top: 6px;">${s.file_count}</div>
+                <div style="font-size: 11px; color: var(--text-soft); margin-top: 4px;">files in ${s.directory}</div>
+              </div>
+            `;
+          }).join('');
+          window._aside_files = aside;
+          document.querySelectorAll('[data-aside-label]').forEach(el => {
+            el.addEventListener('click', () => {
+              const sec = aside.sections.find(s => s.label === el.dataset.asideLabel);
+              if (!sec) return;
+              const isQ = sec.section_type === 'quarantine';
+              $('aside-details').innerHTML = `
+                <div style="padding: 12px; background: var(--surface-2); border-radius: 6px;">
+                  <div style="font-weight:600;margin-bottom:6px;">${sec.label} — ${sec.file_count} files</div>
+                  <div style="font-size:12px;color:var(--text-soft);margin-bottom:8px;">${sec.directory}</div>
+                  ${isQ ? `
+                    <div style="font-size:11px; color:var(--text-muted); margin-bottom:8px;">
+                      Files quarantined by the validation pipeline. Each row shows the rejection reason.
+                    </div>
+                    <div style="display:grid; gap:8px;">
+                      ${sec.files.map(f => `
+                        <div style="padding:8px; background:var(--surface-1); border-left:3px solid var(--warning, #c2410c); border-radius:4px;">
+                          <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+                            <code style="font-size:12px;">${f.name}</code>
+                            <span style="font-size:10px; padding:2px 6px; background:rgba(245,158,11,0.15); color:var(--warning, #c2410c); border-radius:3px; text-transform:uppercase; letter-spacing:0.5px; font-weight:600;">${f.reason_category || 'unknown'}</span>
+                          </div>
+                          ${f.reason_details ? `<div style="font-size:11px; color:var(--text-soft); margin-top:4px;">${f.reason_details}</div>` : ''}
+                          ${f.original_path ? `<div style="font-size:10px; color:var(--text-muted); margin-top:4px;">From: <code>${f.original_path}</code></div>` : ''}
+                          ${f.moved_at ? `<div style="font-size:10px; color:var(--text-muted); margin-top:2px;">At: ${new Date(f.moved_at).toLocaleString()}</div>` : ''}
+                        </div>
+                      `).join('')}
+                    </div>
+                  ` : `
+                    <ul style="font-size:12px;margin:0;padding-left:18px;">
+                      ${sec.files.map(f => `<li><code>${f.name}</code> <span style="color:var(--text-muted);">(${f.size_kb} KB)</span></li>`).join('')}
+                    </ul>
+                  `}
+                </div>`;
+            });
+          });
+        } catch(_) {}
+
         $('entity-summary-table').querySelector('tbody').innerHTML =
           rows.join('') || '<tr class="no-hover"><td colspan="5" style="text-align: center; color: var(--text-muted);">No data yet</td></tr>';
 
@@ -647,14 +926,41 @@
       });
     });
 
+    async function refreshMasterTabs() {
+      // Pull entity list from platform summary and build sub-nav buttons
+      try {
+        const s = await api('/api/platform/summary');
+        const entities = Object.keys(s.entities || {}).sort();
+        const nav = $('master-subnav');
+        if (!nav) return;
+        // Preserve currently-selected entity if possible
+        const currentBtn = nav.querySelector('button.active');
+        const currentEntity = currentBtn ? currentBtn.dataset.entity : (entities[0] || 'Customers');
+        nav.innerHTML = entities.map(e => {
+          const cls = e === currentEntity ? ' class="active"' : '';
+          return `<button${cls} data-entity="${escapeHtml(e)}">${escapeHtml(e)}</button>`;
+        }).join('');
+        // Rewire click handlers
+        nav.querySelectorAll('button').forEach(btn => {
+          btn.addEventListener('click', () => {
+            nav.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            state.masterEntity = btn.dataset.entity;
+            refreshMaster();
+          });
+        });
+        if (!state.masterEntity) state.masterEntity = currentEntity;
+      } catch(_) {}
+    }
     async function refreshMaster() {
+      await refreshMasterTabs();
       // Sync sub-nav
       document.querySelectorAll('#master-subnav button').forEach(b =>
         b.classList.toggle('active', b.dataset.entity === state.masterEntity));
       $('master-title').textContent = 'Master ' + state.masterEntity;
 
       try {
-        const r = await api(`/api/platform/master/${state.masterEntity}?limit=1000`);
+        const q = document.getElementById('master-search')?.value || ''; const r = await api(`/api/platform/master/${state.masterEntity}?limit=1000&q=` + encodeURIComponent(q));
         const rows = r.rows || [];
         const tbl = $('master-table');
         if (!rows.length) {
@@ -834,63 +1140,6 @@
     // ═════════════════════════════════════════════════════════════════════
     //                   UPLOAD MODAL + FLOW
     // ═════════════════════════════════════════════════════════════════════
-    function openUploadModal() { $('upload-modal').classList.add('open'); }
-    function closeUploadModal() { $('upload-modal').classList.remove('open'); }
-
-    $('upload-zone').addEventListener('dragover', e => { e.preventDefault(); $('upload-zone').classList.add('dragover'); });
-    $('upload-zone').addEventListener('dragleave', () => $('upload-zone').classList.remove('dragover'));
-    $('upload-zone').addEventListener('drop', e => {
-      e.preventDefault();
-      $('upload-zone').classList.remove('dragover');
-      const f = e.dataTransfer.files[0];
-      if (f) uploadFile(f);
-    });
-    $('upload-file').addEventListener('change', e => {
-      const f = e.target.files[0];
-      if (f) uploadFile(f);
-    });
-
-    async function uploadFile(file) {
-      closeUploadModal();
-      toast(`Uploading <strong>${escapeHtml(file.name)}</strong>…`);
-      const fd = new FormData();
-      fd.append('file', file);
-      try {
-        const r = await fetch('/api/upload', { method: 'POST', body: fd });
-        const data = await r.json();
-        if (!r.ok) throw new Error(data.error || 'Upload failed');
-        // Show auto-pipeline result toast
-        const ap = data.auto_pipeline || { steps: [] };
-        const lines = [];
-        for (const s of ap.steps) {
-          if (s.step === 'profile' && s.status === 'ok') lines.push(`📊 Profiled (${s.alerts} alerts)`);
-          else if (s.step === 'standardize' && s.status === 'ok') lines.push(`🧹 Standardized ${s.fixes} field(s)`);
-          else if (s.step === 'ingest' && s.status === 'ok') {
-            const parts = [`+${s.rows_inserted} new`];
-            if (s.rows_duplicates_found > 0) parts.push(`<span style="color: var(--warning); font-weight: 600;">${s.rows_duplicates_found} duplicate(s)</span>`);
-            if (s.rows_enriched > 0) parts.push(`<span style="color: var(--success); font-weight: 600;">${s.fields_enriched_total} field(s) enriched</span>`);
-            lines.push(`🗄 → <strong>${s.target_entity}</strong>: ${parts.join(' · ')} (master: ${s.total_in_master})`);
-            if (s.duplicate_details && s.duplicate_details.length) {
-              const d = s.duplicate_details[0];
-              lines.push(`⚠ Matched master record <code>${escapeHtml(d.matched_pk)}</code>${d.fields_enriched > 0 ? ` — enriched: ${d.enriched_columns.join(', ')}` : ''}`);
-            }
-          } else if (s.step === 'ingest' && s.status === 'skipped') {
-            lines.push(`<span style="color: var(--text-muted);">Source not auto-routed — use Workspace to choose target.</span>`);
-          }
-        }
-        toast(`<strong>${escapeHtml(data.filename)}</strong> ingested<br><div style="margin-top: 6px; font-size: 12px; line-height: 1.7;">${lines.join('<br>')}</div>`, 'success');
-        // Auto-navigate to Master Data if ingestion succeeded
-        const ingest = ap.steps.find(s => s.step === 'ingest' && s.status === 'ok');
-        if (ingest) {
-          state.masterEntity = ingest.target_entity;
-          switchTab('master');
-        } else {
-          refreshDashboard();
-        }
-      } catch (e) {
-        toast(`Upload failed: ${escapeHtml(e.message)}`, 'error');
-      }
-    }
 
 
     // ═════════════════════════════════════════════════════════════════════
@@ -901,23 +1150,81 @@
       document.getElementById('provenance-drawer').style.transform = 'translateX(100%)';
     }
 
+    function filterMasterTable(query) {
+      const q = (query || '').trim().toLowerCase();
+      const tbody = document.querySelector('#master-table tbody');
+      if (!tbody) return;
+      const rows = tbody.querySelectorAll('tr');
+      let shown = 0;
+      rows.forEach(tr => {
+        if (!q) { tr.style.display = ''; shown++; return; }
+        const text = tr.textContent.toLowerCase();
+        const match = text.includes(q);
+        tr.style.display = match ? '' : 'none';
+        if (match) shown++;
+      });
+      const counter = document.getElementById('master-search-count');
+      if (counter) counter.textContent = q ? `${shown} of ${rows.length} rows` : '';
+    }
+
     async function openProvenance(rowIdx) {
       const row = state.lastMasterRows[rowIdx];
       if (!row) return;
       const entity = state.masterEntity;
-      const pkCol = {Customers:'customer_id', Vendors:'vendor_id', Products:'sku', Invoices:'invoice_no'}[entity];
+      const knownPks = {
+        Customers:'customer_id', Vendors:'vendor_id', Products:'sku', Invoices:'invoice_no',
+        Employees:'employee_id', Accounts:'acct_id', Contracts:'contract_id',
+        Departments:'department_code', Inventory:'inv_item_id', Locations:'loc_id',
+        Opportunities:'opp_name', Payments:'pmt_id', Shipments:'ship_id',
+        SalesOrders:'order_id', Sales_orders:'order_id',
+      };
+      let pkCol = knownPks[entity];
+      if (!pkCol) {
+        // Skip audit/lineage columns - they end in _id but aren't the business key
+        const auditPrefixes = ['source_', '_source_', 'ingested_', 'last_', 'merged_', 'confidence_', 'archived_', '_created_', '_promoted_', 'landing_', '_landing_'];
+        const isAudit = k => auditPrefixes.some(p => k.toLowerCase().startsWith(p));
+        const rowKeys = Object.keys(row).filter(k => !isAudit(k));
+        // Prefer a PK column that MATCHES the entity singular (e.g., warranty_id for Warranties)
+        const entityStem = entity.toLowerCase().replace(/ies$/, 'y').replace(/s$/, '');
+        pkCol = rowKeys.find(k => k.toLowerCase().startsWith(entityStem))
+             || rowKeys.find(k => /_id$|_no$|_code$|_key$/i.test(k))
+             || rowKeys[0];
+      }
       const pkValue = row[pkCol] || '(no id)';
 
       // Show drawer immediately with skeleton
-      document.getElementById('drawer-title').textContent = `${entity.slice(0,-1)} ${pkValue}`;
+      let singular = entity;
+      if (entity.endsWith('ies')) singular = entity.slice(0, -3) + 'y';
+      else if (entity.endsWith('ses') || entity.endsWith('xes')) singular = entity.slice(0, -2);
+      else if (entity.endsWith('s') && entity.length > 2) singular = entity.slice(0, -1);
+      document.getElementById('drawer-title').textContent = `${singular} ${pkValue}`;
       document.getElementById('provenance-drawer-backdrop').style.display = 'block';
       document.getElementById('provenance-drawer').style.transform = 'translateX(0)';
       document.getElementById('drawer-content').innerHTML = '<div class="empty-state"><div class="loader"></div><p>Loading provenance...</p></div>';
 
-      // Fetch lineage and find ingestions that mentioned this PK
+      // Fetch per-record source contributions from master_record_sources.
+      // Falls back to ingestion_log walk only for enrichment field-change detail.
       let contributingIngestions = [];
       let enrichedFields = new Set();
+      let fieldChangeMap = {};
       try {
+        // Primary source: master_record_sources (has every contributor to this PK)
+        const rs = await api('/api/platform/record_sources?entity=' + encodeURIComponent(entity) + '&pk=' + encodeURIComponent(pkValue));
+        const srcRows = rs.sources || [];
+        for (const s of srcRows) {
+          // Strip a leading duplicate prefix in the filename (api_api_customers -> api_customers)
+          let displayName = s.filename || s.source_system || s.dataset_id;
+          displayName = displayName.replace(/^api_api_/, 'api_').replace(/^db_/, '');
+          contributingIngestions.push({
+            when: s.first_seen_at,
+            source: displayName,
+            source_system: s.source_system,
+            action: 'contributed',
+            enriched_columns: [],
+          });
+        }
+        // Secondary source: ingestion_log — walk it ONLY to find field-change enrichment
+        // events for this specific PK, so ENRICHED badges show what changed and when.
         const lin = await api('/api/platform/lineage?limit=200');
         const log = lin.log || [];
         for (const ev of log) {
@@ -928,23 +1235,16 @@
           const dups = notes.duplicate_details || [];
           const matched = dups.find(d => String(d.matched_pk) === String(pkValue));
           if (matched) {
-            contributingIngestions.push({
-              when: ev.ingested_at,
-              source: ev.filename || ev.dataset_id,
-              action: matched.fields_enriched > 0 ? 'enriched' : 'confirmed',
-              enriched_columns: matched.enriched_columns || [],
-            });
             (matched.enriched_columns || []).forEach(c => enrichedFields.add(c));
+            (matched.field_changes || []).forEach(fc => {
+              fieldChangeMap[fc.column] = {
+                old_value: fc.old_value,
+                new_value: fc.new_value,
+                source:    ev.filename || ev.dataset_id,
+                when:      ev.ingested_at,
+              };
+            });
           }
-        }
-        // Also count the original-insert source (source_dataset_id on the row)
-        if (row.source_dataset_id) {
-          contributingIngestions.push({
-            when: row.ingested_at || '',
-            source: row.source_dataset_id,
-            action: 'inserted',
-            enriched_columns: [],
-          });
         }
       } catch (e) {
         console.warn('Failed to fetch lineage:', e);
@@ -953,10 +1253,10 @@
       // Sort ingestions chronologically (oldest first)
       contributingIngestions.sort((a, b) => (a.when || '').localeCompare(b.when || ''));
 
-      renderProvenance(row, entity, pkValue, contributingIngestions, enrichedFields);
+      renderProvenance(row, entity, pkValue, contributingIngestions, enrichedFields, fieldChangeMap);
     }
 
-    function renderProvenance(row, entity, pkValue, ingestions, enrichedFields) {
+    function renderProvenance(row, entity, pkValue, ingestions, enrichedFields, fieldChangeMap) {
       const mergedCount = row.merged_from_count || 1;
       const banner = mergedCount > 1
         ? `<div style="padding: 12px 14px; background: var(--success-soft); border-left: 3px solid var(--success); border-radius: 6px; margin-bottom: 16px; font-size: 13px;">
@@ -971,12 +1271,28 @@
       const businessFields = Object.entries(row).filter(([k]) => !lineageCols.has(k) && row[k] !== null && row[k] !== '');
       const fieldRows = businessFields.map(([k, v]) => {
         const isEnriched = enrichedFields.has(k);
+        const change = fieldChangeMap[k];
         const tag = isEnriched
           ? '<span class="badge badge-success" style="margin-left: 6px;">enriched</span>'
           : '';
+        let valueBlock;
+        if (isEnriched && change) {
+          const oldStr = (change.old_value === null || change.old_value === '' || change.old_value === undefined)
+            ? '<em style="color: var(--text-soft);">(empty)</em>'
+            : escapeHtml(change.old_value);
+          const when = change.when ? new Date(change.when).toLocaleString() : '';
+          valueBlock = `
+            <div style="font-size: 14px; color: var(--success); font-weight: 500;">${escapeHtml(v)}</div>
+            <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px; padding: 6px 8px; background: var(--surface-2); border-radius: 4px;">
+              <strong style="color: var(--text-soft);">Was:</strong> ${oldStr} → <strong style="color: var(--success);">Now:</strong> ${escapeHtml(change.new_value)}
+              <br><span style="color: var(--text-soft); font-size: 10px;">Added by <code>${escapeHtml(change.source)}</code> · ${escapeHtml(when)}</span>
+            </div>`;
+        } else {
+          valueBlock = `<div style="font-size: 14px;">${escapeHtml(v)}</div>`;
+        }
         return `<div style="padding: 8px 0; border-bottom: 1px solid var(--border);">
           <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">${escapeHtml(k)}${tag}</div>
-          <div style="font-size: 14px; ${isEnriched ? 'color: var(--success); font-weight: 500;' : ''}">${escapeHtml(v)}</div>
+          ${valueBlock}
         </div>`;
       }).join('');
 
@@ -1012,12 +1328,385 @@
       `;
     }
 
+
+    
+    async function resetProject() {
+      if (!confirm('Reset the platform? This wipes all master records, ingestion history, and lineage events. Source files and connectors stay intact.')) return;
+      try {
+        const r = await api('/api/platform/reset', { method: 'POST' });
+        const wiped = Object.entries(r.wiped || {}).filter(([_, n]) => n).map(([t, n]) => `${t.replace("master_","")}: ${n}`).join(', ');
+        toast(`Platform reset. Cleared: ${wiped || 'nothing to clear'}.`, 'success');
+        refreshDashboard();
+        if (state.tab === 'master') refreshMaster();
+        if (state.tab === 'lineage') refreshLineage();
+      } catch (e) {
+        toast(`Reset failed: ${escapeHtml(e.message)}`, 'error');
+      }
+    }
+
+
+    // ═════════════════════════════════════════════════════════════════════
+    //                   CONNECT SOURCES WIZARD
+    // ═════════════════════════════════════════════════════════════════════
+    state.wizard = { folder: [], sharepoint: [], excel: [], database: [], restapi: [], selected: {folder:new Set(), sharepoint:new Set(), excel:new Set(), database:new Set(), restapi:new Set()}, activeTab: 'folder' };
+
+    function switchSourceTab(name) {
+      state.wizard.activeTab = name;
+      document.querySelectorAll('.modal .sub-nav button').forEach(b =>
+        b.classList.toggle('active', b.dataset.source === name));
+      document.querySelectorAll('.source-tab').forEach(t => t.style.display = 'none');
+      $(`source-tab-${name}`).style.display = 'block';
+      updateSelectionCount();
+    }
+
+    async function openUploadModal() {
+      $('upload-modal').classList.add('open');
+      state.wizard.selected = { folder: new Set(), sharepoint: new Set(), excel: new Set(), database: new Set(), restapi: new Set() };
+      $('batch-progress').style.display = 'none';
+      $('batch-progress').innerHTML = '';
+      await Promise.all([loadFolder(), loadSharePoint(), loadExcel(), loadDatabase(), loadRestApi()]);
+      switchSourceTab('folder');
+      updateSelectionCount();
+    }
+
+    function closeUploadModal() {
+      $('upload-modal').classList.remove('open');
+    }
+
+    async function loadFolder() {
+      try {
+        const r = await api('/api/sources/folder/list');
+        state.wizard.folder = r.files || [];
+        renderItems('folder', state.wizard.folder, (it, idx) => `
+          <label style="display: flex; align-items: center; padding: 8px; gap: 10px; cursor: pointer; border-radius: 4px;">
+            <input type="checkbox" data-source="folder" data-idx="${idx}" onchange="toggleSelection('folder', ${idx}, this.checked)" style="width: 16px; height: 16px;">
+            <div style="flex: 1;">
+              <div style="font-weight: 500; font-size: 13px;">${escapeHtml(it.name)}</div>
+              <div style="font-size: 11px; color: var(--text-muted);">${it.type.toUpperCase()} · ${it.size_kb} KB · ${escapeHtml(it.modified)}</div>
+            </div>
+          </label>`);
+      } catch (e) {
+        $('folder-items').innerHTML = `<div style="color: var(--danger); padding: 12px;">Failed to load folder: ${escapeHtml(e.message)}</div>`;
+      }
+    }
+
+    async function loadSharePoint() {
+      try {
+        const r = await api('/api/sources/sharepoint/list');
+        state.wizard.sharepoint = r.files || [];
+        renderItems('sharepoint', state.wizard.sharepoint, (it, idx) => `
+          <label style="display: flex; align-items: center; padding: 8px; gap: 10px; cursor: pointer; border-radius: 4px;">
+            <input type="checkbox" data-source="sharepoint" data-idx="${idx}" onchange="toggleSelection('sharepoint', ${idx}, this.checked)" style="width: 16px; height: 16px;">
+            <div style="flex: 1;">
+              <div style="font-weight: 500; font-size: 13px;">${escapeHtml(it.name)} <span class="badge badge-accent" style="margin-left: 4px;">SharePoint</span></div>
+              <div style="font-size: 11px; color: var(--text-muted);">${escapeHtml(it.library)} · synced ${escapeHtml(it.synced_at)} · ${it.size_kb} KB</div>
+            </div>
+          </label>`);
+      } catch (e) {
+        $('sharepoint-items').innerHTML = `<div style="color: var(--danger); padding: 12px;">Failed: ${escapeHtml(e.message)}</div>`;
+      }
+    }
+
+    
+    async function loadExcel() {
+      try {
+        const r = await api('/api/sources/excel/list');
+        state.wizard.excel = r.files || [];
+        renderItems('excel', state.wizard.excel, (it, idx) => `
+          <label style="display: flex; align-items: center; padding: 8px; gap: 10px; cursor: pointer; border-radius: 4px;">
+            <input type="checkbox" data-source="excel" data-idx="${idx}" onchange="toggleSelection('excel', ${idx}, this.checked)" style="width: 16px; height: 16px;">
+            <div style="flex: 1;">
+              <div style="font-weight: 500; font-size: 13px;">${escapeHtml(it.name)} <span class="badge badge-accent" style="margin-left: 4px;">Excel</span></div>
+              <div style="font-size: 11px; color: var(--text-muted);">${escapeHtml(it.department || "")} · ${it.size_kb} KB · modified ${escapeHtml(it.modified)}</div>
+            </div>
+          </label>`);
+      } catch (e) {
+        $('excel-items').innerHTML = `<div style="color: var(--danger); padding: 12px;">Failed: ${escapeHtml(e.message)}</div>`;
+      }
+    }
+
+    
+    async function loadRestApi() {
+      try {
+        const r = await api('/api/sources/restapi/list');
+        state.wizard.restapi = r.files || [];
+        if (r.error) {
+          $('restapi-items').innerHTML = `<div style="color:var(--warning);padding:12px;">API unreachable: ${escapeHtml(r.error)}<br><span style="font-size:11px;color:var(--text-muted);">Start mock API: cd ~/mock_hr_api && python server.py</span></div>`;
+          return;
+        }
+        const header = `<div style="font-size:11px;color:var(--text-muted);padding:4px 8px;margin-bottom:6px;border-bottom:1px solid var(--border);">
+          📡 ${escapeHtml(r.service)} v${escapeHtml(r.version)} · ${escapeHtml(r.base_url)}</div>`;
+        renderItems('restapi', state.wizard.restapi, (it, idx) => `
+          <label style="display: flex; align-items: center; padding: 8px; gap: 10px; cursor: pointer; border-radius: 4px;">
+            <input type="checkbox" data-source="restapi" data-idx="${idx}" onchange="toggleSelection('restapi', ${idx}, this.checked)" style="width: 16px; height: 16px;">
+            <div style="flex: 1;">
+              <div style="font-weight: 500; font-size: 13px;">${escapeHtml(it.name)} <span class="badge badge-accent" style="margin-left:4px;">REST</span></div>
+              <div style="font-size: 11px; color: var(--text-muted);">${escapeHtml(it.path)} · ${it.field_count} fields · ${escapeHtml(it.modified || "")}</div>
+            </div>
+          </label>`);
+        $('restapi-items').insertAdjacentHTML('afterbegin', header);
+      } catch (e) {
+        $('restapi-items').innerHTML = `<div style="color: var(--danger); padding: 12px;">Failed: ${escapeHtml(e.message)}</div>`;
+      }
+    }
+
+    async function loadDatabase() {
+      try {
+        const r = await api('/api/sources/database/tables');
+        state.wizard.database = r.tables || [];
+        renderItems('database', state.wizard.database, (t, idx) => `
+          <label style="display: flex; align-items: center; padding: 8px; gap: 10px; cursor: pointer; border-radius: 4px;">
+            <input type="checkbox" data-source="database" data-idx="${idx}" onchange="toggleSelection('database', ${idx}, this.checked)" style="width: 16px; height: 16px;">
+            <div style="flex: 1;">
+              <div style="font-weight: 500; font-size: 13px;">${escapeHtml(t.name)} <span class="badge badge-warning" style="margin-left: 4px;">DB Table</span></div>
+              <div style="font-size: 11px; color: var(--text-muted);">${t.rows} rows · ${t.columns.length} columns: ${escapeHtml(t.columns.slice(0,4).join(', '))}${t.columns.length > 4 ? '…' : ''}</div>
+            </div>
+          </label>`);
+      } catch (e) {
+        $('database-items').innerHTML = `<div style="color: var(--danger); padding: 12px;">Failed: ${escapeHtml(e.message)}</div>`;
+      }
+    }
+
+    function selectAllInTab(source, checked) {
+      const el = $(`${source}-items`);
+      const cbs = el.querySelectorAll('input[type="checkbox"][data-source="' + source + '"]');
+      state.wizard.selected[source].clear();
+      cbs.forEach((cb, idx) => {
+        cb.checked = checked;
+        if (checked) state.wizard.selected[source].add(idx);
+      });
+      updateSelectionCount();
+    }
+
+    function renderItems(source, items, fmt) {
+      const el = $(`${source}-items`);
+      if (!items.length) {
+        el.innerHTML = '<div style="color: var(--text-muted); padding: 20px; text-align: center;">No items available.</div>';
+        return;
+      }
+      const selectAllHTML = `<div style="padding:6px 8px;border-bottom:1px solid var(--border);background:var(--surface-2);margin-bottom:6px;border-radius:4px;">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px;color:var(--text-soft);">
+          <input type="checkbox" id="${source}-select-all" onchange="selectAllInTab('${source}', this.checked)" style="width:14px;height:14px;">
+          <strong>Select all ${items.length} items</strong>
+        </label>
+      </div>`;
+      el.innerHTML = selectAllHTML + items.map((it, idx) => fmt(it, idx)).join('');
+    }
+
+    function toggleSelection(source, idx, checked) {
+      if (checked) state.wizard.selected[source].add(idx);
+      else state.wizard.selected[source].delete(idx);
+      updateSelectionCount();
+    }
+
+    function updateSelectionCount() {
+      const total = state.wizard.selected.folder.size + state.wizard.selected.sharepoint.size + state.wizard.selected.excel.size + state.wizard.selected.database.size + state.wizard.selected.restapi.size;
+      $('selection-count').textContent = total === 0 ? '0 selected' : `${total} selected across sources`;
+      $('ingest-btn').disabled = total === 0;
+    }
+
+    async function runBatchIngest() {
+      const fileItems = [];
+      const dbItems = [];
+      for (const idx of state.wizard.selected.folder) {
+        const f = state.wizard.folder[idx];
+        fileItems.push({name: f.name, path: f.path, type: f.type});
+      }
+      for (const idx of state.wizard.selected.sharepoint) {
+        const f = state.wizard.sharepoint[idx];
+        fileItems.push({name: f.name, path: f.path, type: f.type});
+      }
+      for (const idx of state.wizard.selected.excel) {
+        const f = state.wizard.excel[idx];
+        fileItems.push({name: f.name, path: f.path, type: f.type});
+      }
+      const apiItems = [];
+      for (const idx of state.wizard.selected.restapi) {
+        const f = state.wizard.restapi[idx];
+        apiItems.push({name: f.name, path: f.path, type: 'rest_endpoint', base_url: f.base_url});
+      }
+      for (const idx of state.wizard.selected.database) {
+        const t = state.wizard.database[idx];
+        dbItems.push({name: t.name, type: 'table'});
+      }
+
+      const progressEl = $('batch-progress');
+      progressEl.style.display = 'block';
+      progressEl.innerHTML = `<div style="padding: 12px; background: var(--accent-soft); border-radius: 6px;">
+        <div style="font-weight: 600; margin-bottom: 6px;">⚡ Ingestion in progress…</div>
+        <div id="batch-log" style="font-size: 12px; font-family: monospace; max-height: 180px; overflow-y: auto;"></div>
+      </div>`;
+      $('ingest-btn').disabled = true;
+
+      const log = $('batch-log');
+      function addLog(html) { log.insertAdjacentHTML('beforeend', `<div>${html}</div>`); log.scrollTop = log.scrollHeight; }
+
+      const callBatch = async (source_type, batch_items) => {
+        try {
+          addLog(`<span style="color: var(--text-muted);">→ Connecting to ${source_type}…</span>`);
+          const r = await api('/api/sources/batch_ingest', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({source_type, items: batch_items}),
+          });
+          for (const res of (r.results || [])) {
+            if (res.status === 'ok' && res.mode === 'direct') {
+              addLog(`<span style="color: var(--success);">✓</span> <strong>${escapeHtml(res.item)}</strong> → ${escapeHtml(res.entity)}: +${res.new} new, ${res.duplicates} dupes, ${res.enriched} enriched`);
+            } else if (res.status === 'ok' && res.mode === 'auto_normalize') {
+              const parts = (res.sub_ingests || []).map(s => `${s.entity}(+${s.new}, ${s.duplicates} dupes)`).join(', ');
+              addLog(`<span style="color: var(--success);">✓</span> <strong>${escapeHtml(res.item)}</strong> → auto-normalized: ${parts}`);
+            } else if (res.status === 'skipped') {
+              addLog(`<span style="color: var(--warning);">⚠</span> ${escapeHtml(res.item)}: ${escapeHtml(res.reason || 'skipped')}`);
+            } else if (res.status === 'duplicate_skipped') {
+              const canonical = res.canonical || res.duplicate_of || 'existing file';
+              addLog(`<span style="color: var(--warning);">⚠</span> <strong>${escapeHtml(res.item)}</strong>: duplicate content detected — matches ${escapeHtml(canonical)}. Not ingested.`);
+            } else if (res.status === 'asided') {
+              addLog(`<span style="color: var(--warning);">⚠</span> ${escapeHtml(res.item)}: ${escapeHtml(res.reason || 'asided')}`);
+            } else {
+              addLog(`<span style="color: var(--danger);">✗</span> ${escapeHtml(res.item)}: ${escapeHtml(res.error || 'failed')}`);
+            }
+          }
+          if (r.summary) {
+            const s = r.summary;
+            const tot = Object.values(s.entities).reduce((a, b) => a + b.rows, 0);
+            const mer = Object.values(s.entities).reduce((a, b) => a + b.duplicates_merged, 0);
+            addLog(`<span style="color: var(--accent-strong); font-weight: 600;">→ Master Repository now: ${tot} records, ${mer} duplicates unified.</span>`);
+          }
+        } catch (e) {
+          addLog(`<span style="color: var(--danger);">✗ Batch failed: ${escapeHtml(e.message)}</span>`);
+        }
+      };
+
+      try {
+      if (fileItems.length) await callBatch('folder', fileItems);
+      if (apiItems.length) await callBatch('restapi', apiItems);
+      if (dbItems.length) await callBatch('database', dbItems);
+      } catch (err) {
+        addLog('<span style="color:var(--danger);">✗ Batch interrupted: ' + escapeHtml(err.message) + '</span>');
+      } finally {
+        addLog('<br><strong>✓ Batch complete.</strong> Refreshing dashboard…');
+        $('ingest-btn').disabled = false;
+        setTimeout(() => {
+          refreshDashboard();
+          if (state.tab === 'master') refreshMaster();
+          if (state.tab === 'lineage') refreshLineage();
+        }, 15000);
+      }
+    }
+
+
+    
+    async function loadMatchQueue() {
+      const entity = $('match-entity').value;
+      const threshold = $('match-threshold').value;
+      $('match-summary').innerHTML = '<em>Running Splink probabilistic linkage…</em>';
+      $('match-pairs').innerHTML = '';
+      try {
+        const r = await api(`/api/match_queue/${entity}?threshold=${threshold}`);
+        if (r.error) {
+          $('match-summary').innerHTML = `<span style="color:var(--danger);">Error: ${escapeHtml(r.error)}</span>`;
+          return;
+        }
+        $('match-summary').innerHTML = `
+          <div style="padding:10px;background:var(--accent-soft);border-radius:6px;">
+            <strong>${r.engine}</strong> compared
+            <code>${escapeHtml(r.sources_compared[0])}</code> ↔
+            <code>${escapeHtml(r.sources_compared[1])}</code><br>
+            Blocking column: <code>${escapeHtml(r.blocking_column||'')}</code> ·
+            Common columns: ${(r.common_columns||[]).map(c=>`<code>${escapeHtml(c)}</code>`).join(', ')}<br>
+            Threshold ≥ ${r.threshold} · Pairs found: <strong>${r.total_pairs}</strong>
+          </div>`;
+        if (!r.pairs || !r.pairs.length) {
+          $('match-pairs').innerHTML = '<div style="color:var(--text-muted);padding:20px;text-align:center;">No pairs above threshold.</div>';
+          return;
+        }
+        const rows = r.pairs.map(p => {
+          const detailRows = Object.entries(p.details||{}).map(([k,v])=>`<div style="font-size:11px;"><strong>${escapeHtml(k)}:</strong> ${escapeHtml(String(v))}</div>`).join('');
+          return `
+            <tr>
+              <td><span class="badge badge-success">${p.probability.toFixed(4)}</span></td>
+              <td><code style="font-size:11px;">${escapeHtml(p.source_a_id)}</code><br><small>${escapeHtml(p.source_a)}</small></td>
+              <td><code style="font-size:11px;">${escapeHtml(p.source_b_id)}</code><br><small>${escapeHtml(p.source_b)}</small></td>
+              <td>${detailRows}</td>
+              <td>
+                <button class="btn btn-approve-pair" style="font-size:11px;padding:2px 8px;" data-a="${p.probability}" data-pa="${escapeHtml(String(p.source_a_id))}" data-pb="${escapeHtml(String(p.source_b_id))}">✓ Approve</button>
+                <button class="btn btn-reject-pair" style="font-size:11px;padding:2px 8px;background:var(--danger-soft);" data-a="${p.probability}" data-pa="${escapeHtml(String(p.source_a_id))}" data-pb="${escapeHtml(String(p.source_b_id))}">✗ Reject</button>
+              </td>
+            </tr>`;
+        }).join('');
+        $('match-pairs').innerHTML = `
+          <table style="width:100%;">
+            <thead><tr><th>Probability</th><th>Source A</th><th>Source B</th><th>Details</th><th>Action</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>`;
+      } catch(e) {
+        $('match-summary').innerHTML = `<span style="color:var(--danger);">${escapeHtml(e.message||String(e))}</span>`;
+      }
+    }
+
     // ═════════════════════════════════════════════════════════════════════
     //                   BOOTSTRAP
     // ═════════════════════════════════════════════════════════════════════
     document.addEventListener('DOMContentLoaded', () => {
+      document.querySelectorAll('.layer-card').forEach(card => {
+        card.addEventListener('click', () => {
+          const layer = card.dataset.layer;
+          const arch = window._architecture;
+          if (!arch) return;
+          const data = arch.layers[layer];
+          const html = `
+            <div style="padding: 12px; background: var(--surface-2); border-radius: 6px; margin-top: 8px;">
+              <div style="font-weight: 600; margin-bottom: 4px;">${data.count} tables in ${layer.toUpperCase()}</div>
+              <div style="font-size: 12px; color: var(--text-soft); margin-bottom: 8px;">${data.description}</div>
+              <table style="width: 100%; font-size: 12px;">
+                <thead><tr><th style="text-align:left">Table</th><th style="text-align:right">Rows</th><th style="text-align:right">Cols</th></tr></thead>
+                <tbody>
+                ${data.tables.slice(0, 20).map(t => `
+                  <tr><td><code style="font-size:11px;">${t.table}</code></td><td style="text-align:right">${t.rows.toLocaleString()}</td><td style="text-align:right">${t.columns}</td></tr>
+                `).join('')}
+                ${data.tables.length > 20 ? `<tr><td colspan="3" style="text-align:center;color:var(--text-muted);font-style:italic;">…${data.tables.length - 20} more</td></tr>` : ''}
+                </tbody>
+              </table>
+            </div>
+          `;
+          $('layer-details').innerHTML = html;
+        });
+      });
+
       refreshDashboard();
     });
-  </script>
+  
+    async function recordMatchDecision(btn, decision) {
+      const entity = document.getElementById('match-entity')?.value || 'Customers';
+      const pa = btn.dataset.pa || '';
+      const pb = btn.dataset.pb || '';
+      const prob = parseFloat(btn.dataset.a || '0');
+      btn.disabled = true;
+      try {
+        const r = await fetch('/api/match_decision', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({entity, pair_a: pa, pair_b: pb, probability: prob, decision})
+        });
+        const j = await r.json();
+        if (r.ok) {
+          btn.textContent = decision === 'approve' ? '✓ Recorded' : '✗ Recorded';
+          btn.style.opacity = '0.6';
+          if (typeof toast === 'function') toast(`Decision recorded: ${decision} (probability ${prob.toFixed(3)})`, 'success');
+        } else {
+          btn.disabled = false;
+          if (typeof toast === 'function') toast('Failed: ' + (j.error || 'unknown'), 'error');
+        }
+      } catch (e) {
+        btn.disabled = false;
+        if (typeof toast === 'function') toast('Network error: ' + e.message, 'error');
+      }
+    }
+    
+    document.addEventListener('click', (e) => {
+      if (e.target.classList.contains('btn-approve-pair')) recordMatchDecision(e.target, 'approve');
+      if (e.target.classList.contains('btn-reject-pair')) recordMatchDecision(e.target, 'reject');
+    });
+
+</script>
 </body>
 </html>

@@ -28,6 +28,15 @@ from .remediation import DataRemediator
 from .schema_inference import SchemaInferencer
 
 
+
+def _clean_currency(val):
+    """Strip $, commas, spaces from currency values so pandera coerces to float."""
+    if val is None or val == "":
+        return None
+    import re as _re
+    cleaned = _re.sub(r"[^\d.\-]", "", str(val))
+    return cleaned or None
+
 class DataQualityService:
     """High-level service that orchestrates the full data quality pipeline."""
 
@@ -63,7 +72,7 @@ class DataQualityService:
 
     # ─── Ingestion ─────────────────────────────────────────────────────────
 
-    def load_from_file(self, file_path: str | Path) -> tuple[str, pd.DataFrame]:
+    def load_from_file(self, file_path: str | Path, source_system: str | None = None) -> tuple[str, pd.DataFrame]:
         """Load a file, persist it on disk, and register it in the catalog.
 
         The catalog row + the on-disk CSV both survive server restarts.
@@ -71,12 +80,18 @@ class DataQualityService:
         """
         source_path = Path(file_path).resolve()
         df = self.ingestion.from_file(source_path)
+        # Cleansing before persist so all downstream layers see clean data
+        try:
+            df, _ = self.remediator.remediate(df)
+        except Exception as _e:
+            print(f"[cleansing] WARN: {_e}")
 
         # Persist the raw CSV in our managed location so the catalog owns the file
         # (the user's uploads/ copy could be deleted/moved at any time)
         import shutil
         managed_csv = self.raw_files_dir / f"{source_path.stem}_{int(pd.Timestamp.utcnow().timestamp())}.csv"
-        df.to_csv(managed_csv, index=False)
+        import csv
+        df.to_csv(managed_csv, index=False, quoting=csv.QUOTE_NONNUMERIC)
 
         dataset_id = self.catalog.register_dataset(
             source=str(source_path),
@@ -84,7 +99,24 @@ class DataQualityService:
             rows=int(len(df)),
             columns=int(len(df.columns)),
             raw_csv_path=managed_csv,
+            source_system=source_system or f"file_{source_path.stem}",
         )
+        # Auto-enhance: write landing table + AutoNormalize + 3NF audit
+        try:
+            from .landing import persist_to_landing
+            from .auto_enhance import auto_enhance_after_ingestion
+            import sqlite3 as _sql
+            _c = _sql.connect(self.catalog.db_path, timeout=30)
+            try:
+                _r = _c.execute("SELECT source_system FROM datasets WHERE dataset_id=?", (dataset_id,)).fetchone()
+                source_system = _r[0] if _r and _r[0] else f"file_{source_path.stem}"
+            finally:
+                _c.close()
+            _lt = persist_to_landing(self.catalog.db_path, source_path.name, df, source_system)
+            if _lt:
+                _rep = auto_enhance_after_ingestion(self.catalog.db_path, _lt)
+        except Exception as _exc:
+            print(f"[auto_enhance] WARN: {_exc}")
 
         # Populate the in-memory cache for fast reads in the same session
         self._cache[dataset_id] = {
@@ -98,7 +130,28 @@ class DataQualityService:
         self, db_path: str | Path, table: str
     ) -> tuple[str, pd.DataFrame]:
         df = self.ingestion.from_sqlite(db_path, table)
-        dataset_id = self._cache_dataset(df, source=f"{db_path}::{table}")
+        # Cleansing fires here too (single source of truth as load_from_file)
+        try:
+            df, _ = self.remediator.remediate(df)
+        except Exception as _e:
+            print(f"[cleansing] WARN: {_e}")
+        # Persist to managed CSV + register in catalog (with stable source_system for idempotency)
+        import csv as _csv
+        managed_csv = self.raw_files_dir / f"sqlite_{table}_{int(pd.Timestamp.utcnow().timestamp())}.csv"
+        df.to_csv(managed_csv, index=False, quoting=_csv.QUOTE_NONNUMERIC)
+        dataset_id = self.catalog.register_dataset(
+            source=f"{db_path}::{table}",
+            filename=f"{table}.csv",
+            rows=int(len(df)),
+            columns=int(len(df.columns)),
+            raw_csv_path=managed_csv,
+            source_system=f"sqlite_{table}",
+        )
+        self._cache[dataset_id] = {
+            "dataframe": df,
+            "source": f"{db_path}::{table}",
+            "loaded_at": pd.Timestamp.utcnow().isoformat() + "Z",
+        }
         return dataset_id, df
 
     # ─── Pipeline operations ───────────────────────────────────────────────
@@ -182,6 +235,30 @@ class DataQualityService:
 
         df = self._get_dataset(dataset_id)
         before_preview = df.head(20).fillna("").astype(str).to_dict(orient="records")
+        # Auto-fetch column types from cache or latest analysis if caller didn\'t supply them
+        if column_types is None:
+            cached = self._cache.get(dataset_id, {})
+            analysis = cached.get("analysis")
+            if not analysis:
+                # Pull the latest analysis from catalog
+                try:
+                    analysis = self.catalog.latest_analysis(dataset_id)
+                except Exception:
+                    analysis = None
+            if not analysis:
+                # Lightweight type detection only — avoid the expensive
+                # ydata-profiling + FD-normalization in self.analyze().
+                try:
+                    quality = self.detector.detect_all(df)
+                    # Pull type info from per-column findings
+                    column_types = {}
+                    for col, info in quality.items():
+                        if isinstance(info, dict) and info.get("detected_type"):
+                            column_types[col] = info["detected_type"]
+                except Exception:
+                    column_types = {}
+            else:
+                column_types = self._extract_column_types_from_analysis(analysis)
         cleaned_df, change_log = self.remediator.remediate(df, column_types)
         after_preview = cleaned_df.head(20).fillna("").astype(str).to_dict(orient="records")
 
@@ -585,6 +662,61 @@ class DataQualityService:
             "total_archived": sum(d["archived_count"] for d in result_per_dataset),
         })
 
+    def _resolve_party_name(self, name):
+        """Fuzzy-match a party name against master_customers and master_vendors.
+
+        Returns a master ID (C-NNNNN or V-NNNN) when a confident match is found.
+        Uses rapidfuzz for fuzzy string matching (already in the OSS stack).
+        Falls back to None when no match meets the confidence threshold.
+        """
+        if not name or len(name.strip()) < 2:
+            return None
+        try:
+            from rapidfuzz import process, fuzz
+            import sqlite3 as _sql
+        except ImportError:
+            return None
+        candidates = {}
+        try:
+            with _sql.connect(self.catalog.db_path, timeout=30) as con:
+                try:
+                    rows = con.execute(
+                        "SELECT customer_id, full_name FROM master_customers "
+                        "WHERE archived_at IS NULL AND full_name IS NOT NULL AND full_name != ''"
+                    ).fetchall()
+                    for cid, full_name in rows:
+                        candidates[full_name] = cid
+                except Exception:
+                    pass
+                try:
+                    rows = con.execute(
+                        "SELECT vendor_id, vendor_name FROM master_vendors "
+                        "WHERE archived_at IS NULL AND vendor_name IS NOT NULL AND vendor_name != ''"
+                    ).fetchall()
+                    for vid, vendor_name in rows:
+                        candidates[vendor_name] = vid
+                except Exception:
+                    pass
+        except Exception as e:
+            print(f"[name_resolution] WARN: {e}")
+            return None
+        if not candidates:
+            return None
+        match = process.extractOne(
+            name.strip(),
+            list(candidates.keys()),
+            scorer=fuzz.WRatio,
+            score_cutoff=80,
+        )
+        if match:
+            matched_name, score, _idx = match
+            resolved_id = candidates[matched_name]
+            print(f"[name_resolution] {name!r} -> {resolved_id} (matched {matched_name!r}, score={score:.0f})")
+            return resolved_id
+        print(f"[name_resolution] {name!r} -> no confident match (best below 80)")
+        return None
+
+
     def load_from_pdf(self, pdf_path: str | Path) -> dict[str, Any]:
         """Extract data from a PDF and load it as a dataset.
 
@@ -603,13 +735,59 @@ class DataQualityService:
         # invoice_date, total) as additional columns on every row — so the header
         # context isn\'t lost when only the line items would be in the table.
         kv = result.get("key_value") or {}
-        if result["tables"]:
-            df = result["tables"][0].copy()
-            for k, v in kv.items():
-                if k not in df.columns:
-                    df[k] = v
-        elif kv:
-            df = pd.DataFrame([kv])
+
+        # ------------------------------------------------------------------
+        # One PDF = one invoice header row.
+        # Line items are aggregated into the header (count, JSON blob)
+        # instead of being exploded into multiple master_invoices rows.
+        # Customer name is resolved to an ID via fuzzy match.
+        # ------------------------------------------------------------------
+        line_items_df = result["tables"][0] if result["tables"] else None
+
+        if kv.get("invoice_no"):
+            header = {
+                "invoice_no":   kv.get("invoice_no", ""),
+                "invoice_date": kv.get("invoice_date", ""),
+                "due_date":     kv.get("due_date", ""),
+                "amount":       _clean_currency(kv.get("total")),
+                "vendor":       kv.get("vendor", ""),
+            }
+            if line_items_df is not None and not line_items_df.empty:
+                header["line_item_count"] = len(line_items_df)
+                for col in line_items_df.columns:
+                    _colnorm = str(col).lower().replace(" ", "_").replace("-", "_")
+                    if _colnorm in ("total", "amount", "line_total", "line_amount", "unit_price", "extended_price"):
+                        try:
+                            header["line_items_sum"] = float(
+                                pd.to_numeric(line_items_df[col], errors="coerce").sum()
+                            )
+                        except Exception:
+                            pass
+                        break
+                try:
+                    header["line_items_json"] = line_items_df.to_json(orient="records")
+                except Exception:
+                    pass
+            # If PDF header had no total but line items summed to something, use that
+            if not header.get("amount") and header.get("line_items_sum"):
+                header["amount"] = header["line_items_sum"]
+
+            # Priority: extractor may have found "Customer ID: X-NNNNN" directly
+            _direct_id = (kv.get("customer_id") or "").strip()
+            if _direct_id:
+                header["customer_id"] = _direct_id
+
+            customer_name = (kv.get("customer") or "").strip()
+            resolved_id = self._resolve_party_name(customer_name) if customer_name else None
+            if resolved_id:
+                header["customer_id"] = resolved_id
+            # else: leave customer_id absent — pandera treats missing as nullable
+            #       (setting "" causes regex rejection: must match C-NNNNN|V-NNNN)
+            if customer_name:
+                header["bill_to_name"] = customer_name
+            df = pd.DataFrame([header])
+        elif line_items_df is not None:
+            df = line_items_df.copy()
         else:
             raise ValueError(
                 "PDF contained no tables and no recognizable key-value pairs. "
@@ -619,8 +797,13 @@ class DataQualityService:
         # Persist the extracted data as CSV. Use a temp path while we ask the
         # catalog to mint a dataset_id, then rename to the final path and update
         # the catalog so its raw_csv_path points at the actual file.
-        filename = pdf_path.stem + ".csv"
+        filename = pdf_path.name  # preserve original .pdf name for display
         import uuid as _uuid
+        # Cleansing fires before CSV write — PDFs get the same treatment as CSV/SQLite
+        try:
+            df, _ = self.remediator.remediate(df)
+        except Exception as _e:
+            print(f'[cleansing] PDF WARN: {_e}')
         tmp_csv = self.raw_files_dir / f"_tmp_{_uuid.uuid4().hex[:8]}.csv"
         df.to_csv(tmp_csv, index=False)
 
@@ -630,6 +813,7 @@ class DataQualityService:
             rows=int(len(df)),
             columns=int(len(df.columns)),
             raw_csv_path=tmp_csv,
+            source_system=f"pdf_{Path(pdf_path).stem}",
         )
 
         # Rename temp file to canonical and update the catalog row to match
@@ -664,6 +848,9 @@ class DataQualityService:
         Routes through the existing pipeline: data is already standardized
         when this runs (Apply Fixes is auto-called on upload elsewhere).
         """
+        # Invalidate cache so we read the LATEST version (post-standardization)
+        self._cache.pop(dataset_id, None)
+        self._cache.pop(dataset_id, None)  # force re-read of latest version
         df = self._get_dataset(dataset_id)
         return _to_json_safe(self.master_repo.ingest(df, dataset_id, target_entity))
 

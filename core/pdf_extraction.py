@@ -142,12 +142,23 @@ class PDFExtractor:
             "total":        r"(?:total|amount|grand\s*total|balance\s*due)\s*[:\-]?\s*\$?([0-9,]+\.?[0-9]*)",
             "customer":     r"(?:bill\s*to|customer|client)\s*[:\-]?\s*([^\n\r]+?)(?=\s*(?:from|vendor|supplier|invoice|date|sku|description|$)|\n|\r)",
             "vendor":       r"(?:from|vendor|supplier)\s*[:\-]?\s*([^\n\r]+?)(?=\s*(?:sku|description|qty|invoice|date|$)|\n|\r)",
+            "customer_id":  r"customer\s*id\s*[:\-]\s*([CV]-[0-9]+)",
+
         }
         result: dict[str, str] = {}
         for field, pattern in patterns.items():
             match = re.search(pattern, text, re.IGNORECASE)
             if match:
                 result[field] = match.group(1).strip().rstrip(",.")
+        # If customer looks like a bare ID (e.g. "Id: C-00027"), promote it to
+        # customer_id and clear the customer field so bill_to_name stays clean.
+        _cust = result.get("customer", "")
+        if _cust and re.match(r"^(?:id|customer\s*id)\s*[:\-]?\s*[CV]-[0-9]+$", _cust, re.IGNORECASE):
+            _m = re.search(r"([CV]-[0-9]+)", _cust)
+            if _m and not result.get("customer_id"):
+                result["customer_id"] = _m.group(1)
+            result.pop("customer", None)
+
         return result
 
     @staticmethod

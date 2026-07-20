@@ -8,14 +8,28 @@ Survives server restarts. Provides:
   - Remediation audit log (every fix applied, when, what changed)
 """
 from __future__ import annotations
-
 import json
-import sqlite3
 import uuid
+import sqlite3
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
+import pandas as pd
+
+
+def _compute_source_system(filename: str) -> str:
+    """Canonical source identifier — strips version/run IDs."""
+    import re as _re
+    fname = (filename or "").lower().strip()
+    if fname.startswith("api_"):
+        return "rest_api_" + _re.sub(r'\.csv$', '', fname[4:])
+    if fname.startswith("db_"):
+        return "sqlite_" + _re.sub(r'\.csv$', '', fname[3:])
+    if fname.endswith(".pdf"):
+        return "pdf_" + _re.sub(r'\.pdf$', '', fname)
+    base = _re.sub(r'\.(csv|xlsx|xls|json|tsv)$', '', fname)
+    return "file_" + base
 
 
 class DatasetCatalog:
@@ -101,16 +115,49 @@ class DatasetCatalog:
 
     def register_dataset(
         self, source: str, filename: str, rows: int, columns: int, raw_csv_path: Path
-    ) -> str:
+    , source_system: str | None = None) -> str:
         """Register a newly-uploaded dataset. Returns the dataset_id."""
-        dataset_id = uuid.uuid4().hex[:12]
         now = _utc_now()
         with self._connect() as conn:
+            # Idempotency check: same (source, source_system) means same file
+            # being re-ingested. Return the existing dataset_id and update
+            # its bookkeeping fields instead of creating a duplicate row.
+            existing = None
+            if source_system:
+                existing = conn.execute(
+                    "SELECT dataset_id FROM datasets "
+                    "WHERE source = ? AND source_system = ? "
+                    "LIMIT 1",
+                    (source, source_system),
+                ).fetchone()
+            if existing:
+                dataset_id = existing[0]
+                # Bump current_version and register a new dataset_versions row so
+                # get_current_csv_path returns the FRESH csv, not the stale v1.
+                cur_ver = conn.execute(
+                    "SELECT current_version FROM datasets WHERE dataset_id = ?",
+                    (dataset_id,),
+                ).fetchone()
+                new_version = (cur_ver[0] if cur_ver else 1) + 1
+                conn.execute(
+                    "UPDATE datasets SET rows = ?, columns = ?, loaded_at = ?, "
+                    "raw_csv_path = ?, current_version = ? WHERE dataset_id = ?",
+                    (rows, columns, now, str(raw_csv_path), new_version, dataset_id),
+                )
+                conn.execute(
+                    "INSERT INTO dataset_versions (version_id, dataset_id, version_number, "
+                    "csv_path, change_summary, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                    (uuid.uuid4().hex[:12], dataset_id, new_version, str(raw_csv_path),
+                     f"Re-ingest v{new_version}", now),
+                )
+                print(f"[register_dataset] re-ingest of {filename!r} -> reusing {dataset_id} (new version v{new_version})")
+                return dataset_id
+            dataset_id = uuid.uuid4().hex[:12]
             conn.execute(
                 "INSERT INTO datasets (dataset_id, source, filename, rows, columns, "
-                "loaded_at, current_version, raw_csv_path) "
-                "VALUES (?, ?, ?, ?, ?, ?, 1, ?)",
-                (dataset_id, source, filename, rows, columns, now, str(raw_csv_path)),
+                "loaded_at, current_version, raw_csv_path, source_system) "
+                "VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)",
+                (dataset_id, source, filename, rows, columns, now, str(raw_csv_path), source_system),
             )
             # Version 1 is the raw upload itself
             conn.execute(
@@ -382,7 +429,7 @@ class DatasetCatalog:
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=30)
         conn.execute("PRAGMA foreign_keys = ON")
         try:
             yield conn
