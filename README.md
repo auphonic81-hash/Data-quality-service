@@ -54,4 +54,4 @@ Working prototype. Currently demonstrating the core pipeline pattern. Production
 
 ## Author
 
-Saleh — Computer Engineering background, based in UAE.
+Ahmed — Computer Engineering background, based in UAE.
